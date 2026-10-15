@@ -17,6 +17,11 @@ classifiers = [
 ]
 dependencies = []
 
+[project.urls]
+Homepage = "https://github.com/ternary-ai/deepcq"
+Repository = "https://github.com/ternary-ai/deepcq"
+Issues = "https://github.com/ternary-ai/deepcq/issues"
+
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
 
