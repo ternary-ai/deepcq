@@ -47,6 +47,32 @@ print(result.sections_included)             # ["metrics"]
 print(f"{result.metrics.reduction_pct:.1f}% smaller")
 ```
 
+### `locate()` — finding relevant chunks in a text blob
+
+For the common case of "which part of this document answers this query"
+(no schema, no memory tiers, just text), `locate()` wraps `DeepCQ` into a
+one-shot convenience function:
+
+```python
+from deepcq import locate
+
+doc = (
+    "The authentication service validates tokens on every request.\n\n"
+    "Rate limiting is enforced per API key using a sliding window counter.\n\n"
+    "The database migration tool applies schema changes in order."
+)
+
+for candidate in locate(doc, "how does rate limiting work?"):
+    print(candidate.index, candidate.score, candidate.text)
+```
+
+`locate()` splits `text` on `chunk_on` (default `"\n\n"`), scores each chunk
+against `query`, and returns `Candidate(index, text, score)` objects for
+chunks at or above `confidence_threshold`, ordered by position in the
+original text. `text` is returned unmodified — no headers, no wrapping — so
+it's safe to use directly for verbatim matching against the source document.
+Pass `max_candidates` to cap the result to the highest-scoring chunks.
+
 ## How it works
 
 ### 1. Five memory tiers

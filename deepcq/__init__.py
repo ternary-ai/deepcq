@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from importlib import import_module
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 _EXPORTS = {
     "DeepCQ": ("deepcq.core", "DeepCQ"),
@@ -14,11 +14,14 @@ _EXPORTS = {
     "History": ("deepcq.memory.session", "History"),
     "LongTermStore": ("deepcq.memory.store", "LongTermStore"),
     "ReferenceData": ("deepcq.memory.store", "ReferenceData"),
+    "locate": ("deepcq.locate", "locate"),
+    "Candidate": ("deepcq.locate", "Candidate"),
 }
 
 __all__ = [
     "DeepCQ", "MemorySchema", "QueryResult", "OptimizationMetrics",
     "AppState", "SessionCache", "History", "LongTermStore", "ReferenceData",
+    "locate", "Candidate",
 ]
 
 

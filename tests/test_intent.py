@@ -51,3 +51,38 @@ def test_keyword_boost():
     texts = {"state": "[db]\npostgres latency: 50ms\n"}
     scores = score_sections("how fast are database queries?", schema, texts)
     assert scores["db"] >= schema.confidence_threshold
+
+
+def test_literal_emoji_anchor_forces_inclusion():
+    # "status" holds only an emoji + a short label — the tokenizer alone
+    # gives near-zero overlap with a query about it, so without literal
+    # anchor matching this section would fall below the threshold.
+    schema = MemorySchema(sections=["status", "errors"], confidence_threshold=0.3)
+    texts = {
+        "state": (
+            "[status]\n🚀 launched\n"
+            "[errors]\n- OOM at 02:15\n"
+        )
+    }
+    scores = score_sections("what does 🚀 mean?", schema, texts)
+    assert scores["status"] == 1.0
+    assert scores["status"] > scores["errors"]
+
+
+def test_literal_quoted_anchor_forces_inclusion():
+    # Query is diluted with several unrelated non-stopword tokens so that
+    # bag-of-tokens overlap alone stays well below 1.0 — only the exact
+    # quoted phrase should be able to push the score to 1.0.
+    schema = MemorySchema(sections=["config", "errors"], confidence_threshold=0.3)
+    texts = {
+        "state": (
+            "[config]\nfeature toggle: circuit-breaker-v2 enabled\n"
+            "[errors]\n- OOM at 02:15\n"
+        )
+    }
+    query = (
+        'please explain the deployment rollback throttle safeguard '
+        '"circuit-breaker-v2" policy now'
+    )
+    scores = score_sections(query, schema, texts)
+    assert scores["config"] == 1.0
