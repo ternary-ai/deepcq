@@ -41,3 +41,8 @@ def test_tokenize_no_stems():
     assert "cpu" in tokens
     assert "spikes" in tokens
     assert "spike" not in tokens
+
+
+def test_content_words_preserves_order_and_duplicates():
+    from deepcq.tokens import content_words
+    assert content_words("The cost of the cost, sold!") == ["cost", "cost", "sold"]

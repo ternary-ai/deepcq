@@ -72,8 +72,12 @@ class DeepCQ:
         full_text = "\n".join(v for v in tier_texts.values() if v)
         original_chars = len(full_text)
 
+        tiers = {
+            "state": self.state, "cache": self.cache, "history": self.history,
+            "notes": self.notes, "reference": self.reference,
+        }
         explanations = score_sections_detailed(
-            query, self.schema, tier_texts, recency=recency, now=now
+            query, self.schema, tier_texts, recency=recency, now=now, tiers=tiers
         )
         intent = {section: exp.score for section, exp in explanations.items()}
 

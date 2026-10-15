@@ -1,4 +1,8 @@
+import re
+import time
+
 from deepcq.locate import locate, Candidate
+from deepcq.decay import Recency, exponential_decay
 
 
 _DOC = (
@@ -59,3 +63,43 @@ def test_candidate_is_dataclass_with_expected_fields():
     assert isinstance(c.index, int)
     assert isinstance(c.text, str)
     assert isinstance(c.score, float)
+    assert isinstance(c.matched_tokens, list)
+    assert isinstance(c.matched_anchors, list)
+    assert isinstance(c.literal_hit, bool)
+
+
+def test_candidate_reports_matched_tokens():
+    candidates = locate(_DOC, "how does rate limiting work?")
+    c = next(c for c in candidates if "sliding window" in c.text)
+    assert "rate" in c.matched_tokens
+    assert c.literal_hit is False
+
+
+def test_candidate_reports_literal_anchor_hit():
+    text = "The 🚀 launch service handles deploys.\n\nThe cache warms nightly."
+    candidates = locate(text, "what does 🚀 do?")
+    c = next(c for c in candidates if "launch" in c.text)
+    assert c.literal_hit is True
+    assert "🚀" in c.matched_anchors
+
+
+def test_custom_anchor_patterns_override_defaults():
+    ticket_id = re.compile(r"\bTICKET-\d+\b")
+    text = "Fix applied per TICKET-4471.\n\nUnrelated maintenance notes here."
+    candidates = locate(text, "what about TICKET-4471?", anchor_patterns=[ticket_id])
+    assert any("TICKET-4471" in c.text for c in candidates)
+
+
+def test_recency_maps_by_chunk_index_and_decays_score():
+    text = "Alpha topic discussion here.\n\nBeta topic discussion here."
+    now = 10_000.0
+    recency = {0: Recency(timestamp=now - 100.0, decay_fn=exponential_decay(100.0))}
+
+    baseline = locate(text, "tell me about alpha and beta topics", confidence_threshold=0.01)
+    damped = locate(
+        text, "tell me about alpha and beta topics",
+        confidence_threshold=0.01, recency=recency, now=now,
+    )
+    base_score = next(c.score for c in baseline if c.index == 0)
+    damped_score = next(c.score for c in damped if c.index == 0)
+    assert damped_score < base_score

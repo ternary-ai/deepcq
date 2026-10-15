@@ -1,8 +1,9 @@
 """T1 — Live application state."""
 from __future__ import annotations
+from ._vocab_cache import VocabCache
 
 
-class AppState:
+class AppState(VocabCache):
     """
     Primary memory tier: the current state of the running application.
 
@@ -13,16 +14,19 @@ class AppState:
     """
 
     def __init__(self) -> None:
+        super().__init__()
         self._sections: dict[str, str] = {}
 
     def set(self, section: str, text: str) -> None:
         self._sections[section] = text
+        self._bump()
 
     def get(self, section: str) -> str:
         return self._sections.get(section, "")
 
     def remove(self, section: str) -> None:
         self._sections.pop(section, None)
+        self._bump()
 
     def sections(self) -> list[str]:
         return list(self._sections.keys())
@@ -35,3 +39,4 @@ class AppState:
 
     def clear(self) -> None:
         self._sections.clear()
+        self._bump()

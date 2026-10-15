@@ -83,3 +83,13 @@ def tokenize(text: str, include_stems: bool = True) -> list[str]:
                 seen.add(s)
                 result.append(s)
     return result
+
+
+def content_words(text: str) -> list[str]:
+    """Lowercase, stopword-filtered words in original order — no stemming,
+    no dedup. The adjacency-preserving counterpart to tokenize(); phrase
+    and multi-word-synonym matching depend on that adjacency."""
+    return [
+        w for w in re.findall(r"[a-zA-Z][a-zA-Z0-9]*", text.lower())
+        if w not in _STOPWORDS and len(w) >= 2
+    ]

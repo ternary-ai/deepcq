@@ -2,12 +2,14 @@
 from __future__ import annotations
 from collections import deque
 from typing import NamedTuple
+from ._vocab_cache import VocabCache
 
 
-class SessionCache:
+class SessionCache(VocabCache):
     """T2 — Ephemeral per-session cache. Deduplicates repeated (key, value) puts."""
 
     def __init__(self, max_entries: int = 30) -> None:
+        super().__init__()
         self._max = max_entries
         self._entries: dict[str, str] = {}
         self._order: list[str] = []
@@ -22,6 +24,7 @@ class SessionCache:
         while len(self._order) > self._max:
             evicted = self._order.pop(0)
             self._entries.pop(evicted, None)
+        self._bump()
 
     def get(self, key: str) -> str | None:
         return self._entries.get(key)
@@ -34,6 +37,7 @@ class SessionCache:
     def clear(self) -> None:
         self._entries.clear()
         self._order.clear()
+        self._bump()
 
 
 class Turn(NamedTuple):
@@ -41,14 +45,16 @@ class Turn(NamedTuple):
     text: str
 
 
-class History:
+class History(VocabCache):
     """T3 — Sliding conversation window. Default: 6 turns."""
 
     def __init__(self, max_turns: int = 6) -> None:
+        super().__init__()
         self._turns: deque[Turn] = deque(maxlen=max_turns)
 
     def add(self, role: str, text: str) -> None:
         self._turns.append(Turn(role=role, text=text))
+        self._bump()
 
     def turns(self) -> list[Turn]:
         return list(self._turns)
@@ -60,3 +66,4 @@ class History:
 
     def clear(self) -> None:
         self._turns.clear()
+        self._bump()

@@ -1,5 +1,7 @@
 import re
 
+import pytest
+
 from deepcq.schema import MemorySchema
 from deepcq.intent import score_sections, score_sections_detailed
 from deepcq.decay import Recency, exponential_decay
@@ -163,3 +165,215 @@ def test_schema_custom_anchor_patterns_used_instead_of_defaults():
 
     scores = score_sections("what about TICKET-4471?", schema, texts)
     assert scores["tickets"] == 1.0
+
+
+# --- 0.3.0: parity net -------------------------------------------------------
+# Reference copy of the pre-0.3.0 scorer: tier texts concatenated into one
+# vocabulary, score = matched / query tokens, literal anchor forces 1.0.
+
+from deepcq.tokens import tokenize
+from deepcq.anchors import extract_literal_anchors
+from deepcq.schema import TIER_NAMES
+from deepcq.vocabulary import SynonymMap
+
+
+def _legacy_scores(query, schema, tier_texts):
+    query_tokens = set(tokenize(query, include_stems=True))
+    anchors = extract_literal_anchors(query, schema.anchor_patterns)
+    scores = {}
+    for section in schema.sections:
+        vocab = set(tokenize(section, include_stems=True))
+        for kw in schema.keywords.get(section, []):
+            vocab.update(tokenize(kw, include_stems=True))
+        section_text = ""
+        pat = schema.extraction_pattern(section)
+        for text in tier_texts.values():
+            if text and (m := pat.search(text)):
+                section_text += m.group(0)
+                vocab.update(tokenize(m.group(0), include_stems=True))
+        token_score = (
+            round(len(query_tokens & vocab) / len(query_tokens), 4) if query_tokens else 0.0
+        )
+        scores[section] = 1.0 if any(a in section_text for a in anchors) else token_score
+    return scores
+
+
+_PARITY_QUERIES = [
+    "any cpu or memory issues?", "show me the latest errors", "is the service running?",
+    'what about "OOM" at 02:15?', "what does 🚀 mean?", "timeout latency 120ms",
+    "random words nothing", "", "postgres database queries", "78% cpu moving average",
+]
+
+_PARITY_FIXTURES = [
+    (_make_schema(), _make_texts()),
+    (
+        MemorySchema(sections=["db", "status"], keywords={"db": ["database", "postgres"]}),
+        {
+            "state": "[status]\nAll services running 🚀\n",
+            "cache": "[db]\npostgres latency 50ms",
+            "history": "USER: [db] what about database queries?",
+            "notes": "[db]\nmigrated to postgres 16, moving average latency down",
+            "reference": "[status] OOM at 02:15",
+        },
+    ),
+]
+
+
+@pytest.mark.parametrize("schema,texts", _PARITY_FIXTURES)
+@pytest.mark.parametrize("query", _PARITY_QUERIES)
+def test_defaults_match_legacy_scorer(schema, texts, query):
+    assert score_sections(query, schema, texts) == _legacy_scores(query, schema, texts)
+
+
+@pytest.mark.parametrize("schema,texts", _PARITY_FIXTURES)
+@pytest.mark.parametrize("query", _PARITY_QUERIES)
+def test_opt_in_fields_at_neutral_values_match_legacy(schema, texts, query):
+    neutral = MemorySchema(
+        sections=schema.sections,
+        keywords=schema.keywords,
+        tier_weights={t: 1.0 for t in TIER_NAMES},
+        schema_weight=1.0,
+        vocabulary=SynonymMap(),
+        phrase_sizes=(),
+    )
+    assert score_sections(query, neutral, texts) == _legacy_scores(query, schema, texts)
+
+
+# --- 0.3.0: synonym vocabulary ----------------------------------------------
+
+def _fundamentals_texts():
+    return {
+        "state": (
+            "[fundamentals]\nearnings per share 4.12, capital expenditure 1.2B\n"
+            "[news]\nCEO interview scheduled\n"
+        )
+    }
+
+
+def test_synonym_resolves_section_without_keywords():
+    plain = MemorySchema(sections=["fundamentals", "news"])
+    vocab = MemorySchema(
+        sections=["fundamentals", "news"],
+        vocabulary=SynonymMap.from_dict({"eps": ["earnings per share"], "capex": ["capital expenditure"]}),
+    )
+    query = "eps and capex?"
+    assert score_sections(query, plain, _fundamentals_texts())["fundamentals"] == 0.0
+    scores = score_sections(query, vocab, _fundamentals_texts())
+    assert scores["fundamentals"] == 1.0
+    assert scores["news"] == 0.0
+
+
+def test_synonym_expansion_works_from_stored_jargon_side():
+    schema = MemorySchema(
+        sections=["fundamentals"],
+        vocabulary=SynonymMap.from_dict({"eps": ["earnings per share"]}),
+    )
+    texts = {"state": "[fundamentals]\nEPS 4.12\n"}
+    exp = score_sections_detailed("earnings per share", schema, texts)["fundamentals"]
+    assert exp.score == 1.0
+    assert "share" in exp.matched_tokens
+
+
+def test_synonym_does_not_dilute_unrelated_query_tokens():
+    # Expansion is vocab-side only: a query mentioning "eps" keeps the same
+    # number of query tokens, so a section matching only "revenue" scores
+    # the same with or without a vocabulary.
+    texts = {"state": "[sales]\nrevenue up 4%\n"}
+    plain = MemorySchema(sections=["sales"])
+    vocab = MemorySchema(sections=["sales"], vocabulary=SynonymMap.from_dict({"eps": ["earnings per share"]}))
+    assert score_sections("eps revenue", plain, texts) == score_sections("eps revenue", vocab, texts)
+
+
+# --- 0.3.0: phrase-aware matching -------------------------------------------
+
+def _indicator_texts():
+    return {
+        "state": (
+            "[indicators]\nmoving average 50d crossed above 200d; RSI 61; MACD flat; volume light\n"
+            "[news]\nmoving to a new office, average commute shorter\n"
+        )
+    }
+
+
+def test_phrase_bonus_pushes_section_over_threshold():
+    query = "moving average signal trend strength momentum"
+    plain = MemorySchema(sections=["indicators", "news"], confidence_threshold=0.5)
+    phrased = MemorySchema(
+        sections=["indicators", "news"], confidence_threshold=0.5, phrase_sizes=(2,)
+    )
+    before = score_sections(query, plain, _indicator_texts())
+    after = score_sections_detailed(query, phrased, _indicator_texts())
+    assert before["indicators"] < 0.5
+    assert after["indicators"].score >= 0.5
+    assert after["indicators"].matched_phrases == ["mov average"]
+    assert after["indicators"].score == round(before["indicators"] + 0.25, 4)
+    # "news" has both words, but not adjacent — no bonus.
+    assert after["news"].score == before["news"]
+    assert after["news"].matched_phrases == []
+
+
+def test_phrase_bonus_capped_at_one():
+    schema = MemorySchema(sections=["indicators"], phrase_sizes=(2, 3), phrase_boost=1.0)
+    exp = score_sections_detailed("moving average", schema, _indicator_texts())["indicators"]
+    assert exp.score == 1.0
+
+
+def test_phrase_sizes_empty_is_parity():
+    query = "moving average signal"
+    assert score_sections(query, MemorySchema(sections=["indicators", "news"]), _indicator_texts()) == \
+        _legacy_scores(query, MemorySchema(sections=["indicators", "news"]), _indicator_texts())
+
+
+# --- 0.3.0: per-tier weighting ----------------------------------------------
+
+def _two_tier_texts():
+    return {
+        "state": "[deploy]\nrollout healthy\n",
+        "history": "USER: [deploy] the canary rollback happened yesterday",
+    }
+
+
+def test_token_counts_at_max_tier_weight_not_sum():
+    schema = MemorySchema(sections=["deploy"], tier_weights={"history": 0.5})
+    # "rollout" only in state (1.0); "rollback" only in history (0.5);
+    # "deploy" is in the section name (schema_weight 1.0) and both tiers.
+    exp = score_sections_detailed("deploy rollout rollback", schema, _two_tier_texts())["deploy"]
+    assert exp.score == round((1.0 + 1.0 + 0.5) / 3, 4)
+    assert exp.tier_contributions == {"schema": round(1 / 3, 4), "state": round(1 / 3, 4), "history": round(0.5 / 3, 4)}
+
+
+def test_token_found_in_two_tiers_counts_once_at_best_weight():
+    schema = MemorySchema(sections=["deploy"], tier_weights={"state": 0.8, "history": 0.4}, schema_weight=0.0)
+    texts = {"state": "[deploy]\ncanary ok\n", "history": "USER: [deploy] canary failing"}
+    exp = score_sections_detailed("canary", schema, texts)["deploy"]
+    assert exp.score == 0.8
+    assert exp.tier_contributions == {"state": 0.8}
+
+
+def test_weights_above_one_are_capped_per_token():
+    schema = MemorySchema(sections=["deploy"], tier_weights={"state": 3.0})
+    exp = score_sections_detailed("rollout", schema, _two_tier_texts())["deploy"]
+    assert exp.score == 1.0
+
+
+def test_literal_anchor_weighted_by_tier_it_was_found_in():
+    schema = MemorySchema(sections=["deploy"], tier_weights={"history": 0.4})
+    texts = {"state": "[deploy]\nrollout healthy\n", "history": "USER: [deploy] build v2.3.1 failed"}
+    exp = score_sections_detailed("anything on v2.3.1?", schema, texts)["deploy"]
+    assert exp.literal_hit is True
+    assert exp.score == 0.4
+
+
+def test_tier_contributions_sum_to_token_score():
+    schema = _make_schema()
+    for exp in score_sections_detailed("any cpu or memory issues?", schema, _make_texts()).values():
+        assert abs(sum(exp.tier_contributions.values()) - exp.score) < 1e-3
+
+
+def test_schema_rejects_bad_opt_in_values():
+    with pytest.raises(ValueError, match="unknown tier"):
+        MemorySchema(sections=["a"], tier_weights={"stat": 1.0})
+    with pytest.raises(ValueError, match="non-negative"):
+        MemorySchema(sections=["a"], tier_weights={"state": -1.0})
+    with pytest.raises(ValueError, match="phrase_sizes"):
+        MemorySchema(sections=["a"], phrase_sizes=(1,))

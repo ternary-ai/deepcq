@@ -2,6 +2,8 @@
 
 **Deep Context Query** — intent-aware memory querying for LLM agents.
 
+*Remember when it matters.*
+
 deepcq sits between an agent's memory and its prompt. Instead of stuffing an
 entire memory blob into every LLM call, it scores which sections of memory
 are actually relevant to the current query and returns only those — cutting
@@ -110,6 +112,62 @@ The section's score is the fraction of unique query tokens found in that
 vocabulary. Sections scoring at or above `schema.confidence_threshold`
 (default `0.3`) are "included".
 
+Extracted section text is cached on each tier object, keyed by a version
+counter that every mutating method bumps — repeated queries against
+unchanged (e.g. large, static `notes`/`reference`) tiers skip the regex
+search and re-tokenization entirely.
+
+#### Opt-in scoring options (0.3.0)
+
+All of these default to off and reduce exactly to the scoring above.
+
+- **Synonym vocabularies** (`vocabulary.py`) — `MemorySchema(vocabulary=...)`
+  expands each section's vocabulary with every synonym cluster whose term
+  occurs in it, so `"eps"` matches stored `"earnings per share"` and vice
+  versa, without per-section `keywords`:
+
+  ```python
+  from deepcq import MemorySchema, SynonymMap, load_pack
+
+  vocab = load_pack("finance") | SynonymMap.from_dict({"arr": ["annual recurring revenue"]})
+  schema = MemorySchema(sections=["fundamentals", "news"], vocabulary=vocab)
+  ```
+
+- **Phrase-aware matching** (`phrases.py`) — `phrase_sizes=(2,)` adds
+  `phrase_boost` (default `0.25`) per stemmed n-gram from the query that
+  appears verbatim (adjacent) in a section, so "moving average" beats text
+  that merely mentions "moving" and "average" apart. Bonus only, capped at
+  1.0 — but it does shift scores, so recalibrate thresholds after enabling.
+
+- **Per-tier weighting** — `tier_weights={"history": 0.5}` (and
+  `schema_weight` for name/keyword matches) make a match in stale tiers
+  count for less. Each query token counts once, at the best weight among
+  the places it was found. `ScoreExplanation.tier_contributions` shows
+  which tier supplied how much of the score.
+
+### Calibrating thresholds (`calibration.py`)
+
+Instead of hand-tuning `confidence_threshold`, label a few cases and sweep:
+
+```python
+from deepcq import calibrate, LabeledExample
+
+def build():                       # one populated DeepCQ per case
+    cq = DeepCQ(schema)
+    cq.state.set("metrics", "[metrics]\nCPU: 78%\n")
+    return cq
+
+report = calibrate([LabeledExample(build, "cpu load?", {"metrics"}), ...])
+print(report.summary())            # threshold | precision | recall | f1
+schema.confidence_threshold = report.best.threshold
+```
+
+Each example is queried once and its raw scores re-thresholded per sweep
+step (micro-averaged precision/recall; best F1, ties → higher threshold).
+Pass `min_precision=` to instead get the highest-recall threshold meeting
+that precision; if none does, `report.constraint_met` is `False` and
+`summary()` prints a warning.
+
 ### 4. Extracting content (`schema.py`, `regex_gen.py`)
 
 Sections are delimited in stored text by a header, `"[{name}]"` by default
@@ -136,6 +194,7 @@ class QueryResult:
     sections_excluded: list[str]
     content_pattern: str              # the regex used against cache/history
     metrics: OptimizationMetrics      # original_chars, filtered_chars, reduction_pct
+    explanations: dict[str, ScoreExplanation]  # matched tokens/anchors/phrases, tier_contributions
 ```
 
 ### Fallback safety
@@ -155,7 +214,14 @@ deepcq/
 │   ├── __init__.py              # public API: DeepCQ, MemorySchema, QueryResult, ...
 │   ├── core.py                  # DeepCQ orchestrator (query())
 │   ├── schema.py                # MemorySchema + extraction regex compilation
-│   ├── intent.py                # score_sections()
+│   ├── intent.py                # score_sections() / score_sections_detailed()
+│   ├── anchors.py               # literal-anchor extraction
+│   ├── decay.py                 # Recency + decay functions
+│   ├── vocabulary.py            # SynonymMap, load_pack()
+│   ├── vocab_packs/             # built-in synonym packs (finance.json)
+│   ├── phrases.py               # extract_phrases() for phrase-aware matching
+│   ├── calibration.py           # calibrate() threshold sweep
+│   ├── locate.py                # locate() chunk retrieval
 │   ├── tokens.py                # tokenize() / stem()
 │   ├── regex_gen.py              # query-token regex builder for free-text tiers
 │   ├── result.py                # QueryResult / OptimizationMetrics dataclasses

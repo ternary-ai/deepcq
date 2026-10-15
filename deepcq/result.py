@@ -9,6 +9,11 @@ class ScoreExplanation:
     matched_tokens: list[str]
     matched_anchors: list[str]
     literal_hit: bool
+    matched_phrases: list[str] = field(default_factory=list)
+    # Source -> share of the token score it supplied (each matched token is
+    # credited to the highest-weighted place it was found). Sources are tier
+    # names plus "schema" for the section's own name/keywords.
+    tier_contributions: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass

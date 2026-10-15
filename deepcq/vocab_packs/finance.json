@@ -1,0 +1,117 @@
+{
+  "eps": [
+    "earnings per share"
+  ],
+  "pe ratio": [
+    "price to earnings",
+    "price earnings ratio",
+    "earnings multiple"
+  ],
+  "peg ratio": [
+    "price earnings to growth"
+  ],
+  "pb ratio": [
+    "price to book"
+  ],
+  "ps ratio": [
+    "price to sales"
+  ],
+  "capex": [
+    "capital expenditure",
+    "capital expenditures",
+    "capital spending"
+  ],
+  "opex": [
+    "operating expense",
+    "operating expenses",
+    "operating costs"
+  ],
+  "revenue": [
+    "sales",
+    "turnover",
+    "top line"
+  ],
+  "net income": [
+    "net profit",
+    "net earnings",
+    "bottom line"
+  ],
+  "ebitda": [
+    "earnings before interest taxes depreciation and amortization"
+  ],
+  "ebit": [
+    "operating income",
+    "operating profit",
+    "earnings before interest and taxes"
+  ],
+  "fcf": [
+    "free cash flow"
+  ],
+  "cogs": [
+    "cost of goods sold",
+    "cost of sales",
+    "cost of revenue"
+  ],
+  "gross margin": [
+    "gross profit margin"
+  ],
+  "operating margin": [
+    "ebit margin"
+  ],
+  "roe": [
+    "return on equity"
+  ],
+  "roa": [
+    "return on assets"
+  ],
+  "roic": [
+    "return on invested capital"
+  ],
+  "market cap": [
+    "market capitalization",
+    "market capitalisation",
+    "market value"
+  ],
+  "ev": [
+    "enterprise value"
+  ],
+  "dividend yield": [
+    "dividend rate"
+  ],
+  "dps": [
+    "dividend per share",
+    "dividends per share"
+  ],
+  "debt to equity": [
+    "leverage ratio",
+    "gearing"
+  ],
+  "yoy": [
+    "year over year",
+    "year on year",
+    "annual growth"
+  ],
+  "qoq": [
+    "quarter over quarter",
+    "quarter on quarter"
+  ],
+  "guidance": [
+    "outlook",
+    "forecast"
+  ],
+  "short interest": [
+    "short float",
+    "shares shorted"
+  ],
+  "volatility": [
+    "vol"
+  ],
+  "ticker": [
+    "symbol",
+    "stock symbol"
+  ],
+  "shares outstanding": [
+    "share count",
+    "outstanding shares"
+  ]
+}
