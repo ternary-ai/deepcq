@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from .schema import MemorySchema
-from .intent import score_sections
+from .intent import score_sections_detailed
 from .regex_gen import build_content_pattern, content_pattern_string
 from .result import QueryResult, OptimizationMetrics
+from .decay import Recency
 from .memory.state import AppState
 from .memory.session import SessionCache, History
 from .memory.store import LongTermStore, ReferenceData
@@ -47,9 +48,18 @@ class DeepCQ:
         self.notes = LongTermStore(store_path)
         self.reference = ReferenceData(reference_path)
 
-    def query(self, query: str) -> QueryResult:
+    def query(
+        self,
+        query: str,
+        recency: dict[str, Recency] | None = None,
+        now: float | None = None,
+    ) -> QueryResult:
         """
         Query all memory tiers and return only content relevant to the query.
+
+        `recency` optionally maps a section name to a Recency (timestamp +
+        decay_fn) that time-weights that section's score; `now` pins the
+        reference time for that decay (defaults to the current time).
         """
         tier_texts: dict[str, str] = {
             "state":     self.state.as_text(),
@@ -62,7 +72,10 @@ class DeepCQ:
         full_text = "\n".join(v for v in tier_texts.values() if v)
         original_chars = len(full_text)
 
-        intent = score_sections(query, self.schema, tier_texts)
+        explanations = score_sections_detailed(
+            query, self.schema, tier_texts, recency=recency, now=now
+        )
+        intent = {section: exp.score for section, exp in explanations.items()}
 
         included: list[str] = []
         excluded: list[str] = []
@@ -84,6 +97,7 @@ class DeepCQ:
                     filtered_chars=original_chars,
                     reduction_pct=0.0,
                 ),
+                explanations=explanations,
             )
 
         parts: list[str] = []
@@ -123,4 +137,5 @@ class DeepCQ:
                 filtered_chars=filtered_chars,
                 reduction_pct=reduction_pct,
             ),
+            explanations=explanations,
         )

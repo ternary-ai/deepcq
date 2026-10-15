@@ -29,6 +29,11 @@ class MemorySchema:
     fallback_include_all:
         When True (default), return all content unfiltered if no section
         scores above the threshold. Prevents silent data loss.
+
+    anchor_patterns:
+        Optional override for the regex patterns used to extract literal
+        anchors (see anchors.py) from queries against this schema. None
+        (default) uses anchors.DEFAULT_ANCHOR_PATTERNS.
     """
 
     sections: Sequence[str]
@@ -36,6 +41,7 @@ class MemorySchema:
     section_header_format: str = "[{name}]"
     confidence_threshold: float = 0.3
     fallback_include_all: bool = True
+    anchor_patterns: Sequence[re.Pattern[str]] | None = None
 
     def __post_init__(self) -> None:
         name_idx = self.section_header_format.index("{name}")

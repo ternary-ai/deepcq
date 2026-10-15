@@ -1,5 +1,5 @@
 import pytest
-from deepcq import DeepCQ, MemorySchema
+from deepcq import DeepCQ, MemorySchema, Recency, exponential_decay
 
 
 @pytest.fixture
@@ -94,3 +94,24 @@ def test_minimal_state_only():
     cq.state.set("health", "[health]\nStatus: degraded\nLatency: 5000ms\n")
     result = cq.query("is anything degraded?")
     assert "degraded" in result.content
+
+
+def test_explanations_present_for_every_section(cq):
+    result = cq.query("any cpu issues?")
+    assert set(result.explanations.keys()) == {"status", "errors", "metrics"}
+    assert result.explanations["metrics"].score == result.intent["metrics"]
+
+
+def test_explanations_present_on_fallback(cq):
+    result = cq.query("xyzzy flurble")
+    assert set(result.explanations.keys()) == {"status", "errors", "metrics"}
+
+
+def test_recency_decays_section_score(cq):
+    now = 10_000.0
+    recency = {"errors": Recency(timestamp=now - 100.0, decay_fn=exponential_decay(100.0))}
+
+    baseline = cq.query("show me the latest errors")
+    damped = cq.query("show me the latest errors", recency=recency, now=now)
+
+    assert damped.intent["errors"] < baseline.intent["errors"]

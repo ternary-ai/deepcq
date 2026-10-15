@@ -1,5 +1,14 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+@dataclass
+class ScoreExplanation:
+    """Why a section scored the way it did — for debug/trust UIs."""
+    score: float
+    matched_tokens: list[str]
+    matched_anchors: list[str]
+    literal_hit: bool
 
 
 @dataclass
@@ -17,3 +26,4 @@ class QueryResult:
     sections_excluded: list[str]
     content_pattern: str
     metrics: OptimizationMetrics
+    explanations: dict[str, ScoreExplanation] = field(default_factory=dict)
