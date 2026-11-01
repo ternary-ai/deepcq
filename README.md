@@ -191,6 +191,21 @@ end of string — this is how `MemorySchema.extraction_pattern(section)` pulls
 a section's block out of raw tier text. A header ending in a letter or
 digit must end there, so `"## SEC"` doesn't match `"## Sector"`.
 
+In the sectioned tiers (state, notes, reference) a header must start a
+line: a mid-line mention like `"see [status] for uptime"` doesn't start the
+`status` section. A section ends at the next *header line* — a declared
+section's header, or a header-format line whose name starts with a letter
+and has no commas, quotes or brackets, followed by a space or the line end —
+so data lines such as
+`[AAPL, MSFT]`, `["a", "b"]` or a Markdown link don't cut it short. For
+formats with nothing after `{name}` (`"## {name}"`) any line starting with
+the prefix is a header. The free-text tiers (cache, history) still score a
+section from a mention anywhere in a line (`"USER: [deploy] failed"`), via
+`MemorySchema.mention_pattern(section)`.
+
+Returned pieces are joined with a single newline, like the original text,
+so the filtered content is never longer than the input.
+
 For the two free-text tiers (`cache`, `history`, which aren't
 section-delimited), deepcq instead builds a single regex out of all query
 tokens and includes that tier's text only if any token matches

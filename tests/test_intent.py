@@ -172,6 +172,8 @@ def test_schema_custom_anchor_patterns_used_instead_of_defaults():
 # vocabulary, score = matched / query tokens, literal anchor forces 1.0.
 # Updated for the two intended 0.3.1 changes: anchors match whole words /
 # numbers only (anchor_in), and a section found in no tier scores 0.0.
+# Headers start a line in sectioned tiers; free-text tiers (cache, history)
+# still match a mid-line mention.
 
 from deepcq.tokens import tokenize
 from deepcq.anchors import anchor_in, extract_literal_anchors
@@ -188,8 +190,9 @@ def _legacy_scores(query, schema, tier_texts):
         for kw in schema.keywords.get(section, []):
             vocab.update(tokenize(kw, include_stems=True))
         section_texts = []
-        pat = schema.extraction_pattern(section)
-        for text in tier_texts.values():
+        for tier_name, text in tier_texts.items():
+            pat = (schema.mention_pattern(section) if tier_name in ("cache", "history")
+                   else schema.extraction_pattern(section))
             if text and (m := pat.search(text)):
                 section_texts.append(m.group(0))
                 vocab.update(tokenize(m.group(0), include_stems=True))

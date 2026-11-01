@@ -9,6 +9,8 @@ from .result import ScoreExplanation
 from .decay import Recency
 from .memory._vocab_cache import VocabCache, VocabEntry
 
+# Tiers without section structure: a section header may appear mid-line.
+FREE_TEXT_TIERS = frozenset({"cache", "history"})
 SCHEMA_SOURCE = "schema"   # tier_contributions key for name/keyword matches
 
 
@@ -70,8 +72,6 @@ def score_sections_detailed(
     explanations: dict[str, ScoreExplanation] = {}
 
     for section in schema.sections:
-        pat = schema.extraction_pattern(section)
-
         # (source name, weight, vocab, texts the source's phrases come from)
         schema_pieces = [section, *schema.keywords.get(section, [])]
         schema_vocab: set[str] = set()
@@ -87,7 +87,10 @@ def score_sections_detailed(
             if not text:
                 continue
 
-            def compute(text: str = text) -> VocabEntry:
+            pat = (schema.mention_pattern(section) if tier_name in FREE_TEXT_TIERS
+                   else schema.extraction_pattern(section))
+
+            def compute(text: str = text, pat=pat) -> VocabEntry:
                 m = pat.search(text)
                 if not m:
                     return "", []

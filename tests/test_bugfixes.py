@@ -73,6 +73,63 @@ def test_header_ending_in_word_does_not_match_longer_header():
     assert schema.extraction_pattern("SEC").search("## SEC\n10-K\n") is not None
 
 
+# --- section boundaries in sectioned tiers -------------------------------------
+
+def test_mid_line_mention_does_not_start_a_section():
+    cq = DeepCQ(schema=MemorySchema(sections=["status", "errors"]))
+    cq.state.set("errors", "[errors]\n- OOM, see [status] for uptime\n")
+    cq.state.set("status", "[status]\nAll services running\n")
+    content = cq.query("what is the status?").content
+    assert "[status]\nAll services running" in content
+    assert "[status] for uptime" not in content.split("[errors]")[0]
+
+
+def test_history_mention_mid_line_still_scores_the_section():
+    schema = MemorySchema(sections=["deploy"], schema_weight=0.0)
+    texts = {"state": "[deploy]\nok\n", "history": "USER: [deploy] canary failing"}
+    from deepcq.intent import score_sections_detailed
+    exp = score_sections_detailed("canary", schema, texts)["deploy"]
+    assert exp.tier_contributions == {"history": 1.0}
+
+
+@pytest.mark.parametrize("data_line", ["[AAPL, MSFT]", '["a", "b"]', "[link](http://x)", "[1, 2, 3]"])
+def test_data_line_starting_with_bracket_does_not_end_section(data_line):
+    cq = DeepCQ(schema=MemorySchema(sections=["positions", "risk"]))
+    cq.state.set("positions", f"[positions]\nholdings:\n{data_line}\nweights: 60/40\n")
+    cq.state.set("risk", "[risk]\nbeta 1.2\n")
+    content = cq.query("positions weights").content
+    assert data_line in content and "weights: 60/40" in content
+    assert "beta 1.2" not in content
+
+
+def test_undeclared_header_line_still_ends_section():
+    cq = DeepCQ(schema=MemorySchema(sections=["positions"]))
+    cq.state.set("positions", "[positions]\nholdings\n[deploys]\nv2 shipped\n")
+    assert cq.query("positions holdings").content == "[positions]\nholdings"
+
+
+def test_markdown_format_any_prefixed_line_is_a_header():
+    schema = MemorySchema(sections=["SEC"], section_header_format="## {name}")
+    m = schema.extraction_pattern("SEC").search("## SEC\n10-K filed\n## Q3 2024: results, outlook\nbeat")
+    assert m.group(0).strip() == "## SEC\n10-K filed"
+
+
+def test_crlf_header_lines_end_sections():
+    cq = DeepCQ(schema=MemorySchema(sections=["x", "y"]))
+    cq.state.set("x", "[x]\r\nalpha\r\n[note]\r\nother\r\n")
+    assert cq.query("x alpha").content == "[x]\r\nalpha"
+
+
+# --- reduction never negative ----------------------------------------------------
+
+def test_filtered_content_never_longer_than_original():
+    cq = DeepCQ(schema=MemorySchema(sections=["alpha", "beta"]))
+    cq.state.set("alpha", "[alpha]\nrevenue")
+    cq.state.set("beta", "[beta]\nrevenue")
+    m = cq.query("revenue alpha beta").metrics
+    assert m.filtered_chars <= m.original_chars and m.reduction_pct >= 0.0
+
+
 # --- absent sections -----------------------------------------------------------
 
 def _cq():

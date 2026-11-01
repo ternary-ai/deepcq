@@ -178,7 +178,9 @@ class DeepCQ:
             if text and content_pat.search(text):
                 parts.append(text.strip())
 
-        content = "\n\n".join(p for p in parts if p)
+        # Joined like full_text (one newline), so the filtered content can never
+        # be longer than the original: reduction_pct stays >= 0.
+        content = "\n".join(p for p in parts if p)
         filtered_chars = len(content)
         reduction_pct = (
             round((1.0 - filtered_chars / original_chars) * 100, 1)

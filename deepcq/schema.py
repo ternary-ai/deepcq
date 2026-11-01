@@ -11,6 +11,12 @@ if TYPE_CHECKING:
 TIER_NAMES: tuple[str, ...] = ("state", "cache", "history", "notes", "reference")
 
 
+# Name of a header line that isn't a declared section: starts with a letter,
+# no commas, quotes or brackets — "[deploys]" is a header, "[AAPL, MSFT]" and
+# '["a", "b"]' are data.
+_HEADER_NAME = r"""[^\W\d][^\n,"'\[\]{}<>]*?"""
+
+
 @dataclass
 class MemorySchema:
     """
@@ -28,6 +34,14 @@ class MemorySchema:
     section_header_format:
         How sections are delimited in stored text.
         Default "[{name}]" means sections look like "[errors]", "[metrics]".
+        A header must start a line. A section runs up to the next header
+        line: a declared section's header, or — for formats with text after
+        {name}, like the default — a header-format line whose name starts
+        with a letter and has no commas, quotes or brackets, followed by a
+        space or the end of the line (so data lines like "[AAPL, MSFT]" or
+        "[link](url)" don't end the section). For
+        formats with nothing after {name} ("## {name}"), any line starting
+        with the prefix is a header.
 
     confidence_threshold:
         Minimum score (0.0–1.0) for a section to be included.
@@ -89,26 +103,69 @@ class MemorySchema:
 
         name_idx = self.section_header_format.index("{name}")
         self._prefix = self.section_header_format[:name_idx]
+        self._suffix = self.section_header_format[name_idx + len("{name}"):]
 
-        escaped_prefix = re.escape(self._prefix)
-        lookahead = rf"(?=\n{escaped_prefix}|\Z)"
-
-        self._extraction_patterns: dict[str, re.Pattern[str]] = {}
-        for section in self.sections:
+        def header_re(section: str, line_start: bool = False) -> str:
             header = self.section_header_format.format(name=section)
+            escaped = re.escape(header)
             # A header ending in a letter/digit must end there: "## SEC" must
             # not match the header "## Sector".
             boundary = r"(?![A-Za-z0-9_])" if header[-1:].isalnum() else ""
-            pat = re.compile(
-                rf"({re.escape(header)}{boundary}.*?){lookahead}",
-                re.DOTALL | re.IGNORECASE,
+            # Line start checked by a fixed-width lookbehind *after* the
+            # literal, so the regex engine can still jump to the literal
+            # (a leading "^" made locate() several times slower).
+            start = rf"(?<![^\n]{escaped})" if line_start else ""
+            return escaped + start + boundary
+
+        # What ends a section: the next line that is a header (see the class
+        # docstring) — not any line that merely starts with the prefix.
+        # Declared names the generic rule can't recognise are listed
+        # explicitly; listing every header would make each pattern O(sections)
+        # and locate() quadratic in the number of chunks.
+        if self._suffix:
+            generic = (
+                rf"{re.escape(self._prefix)}{_HEADER_NAME}"
+                rf"{re.escape(self._suffix)}(?=[ \t\r]|$)"
             )
-            self._extraction_patterns[section] = pat
+            name_ok = re.compile(_HEADER_NAME + r"\Z")
+            known = "|".join(header_re(s) for s in self.sections if not name_ok.match(s))
+        else:
+            generic = re.escape(self._prefix)
+            known = ""
+        ends = rf"(?=\n(?:{known}|{generic})|\Z)" if known else rf"(?=\n{generic}|\Z)"
+
+        flags = re.DOTALL | re.IGNORECASE | re.MULTILINE
+        self._extraction_patterns: dict[str, re.Pattern[str]] = {}
+        # Compiled on first use: only the free-text tiers need them, and
+        # compiling is the main cost of a schema with many sections.
+        self._mention_sources: dict[str, str] = {}
+        self._mention_patterns: dict[str, re.Pattern[str]] = {}
+        self._flags = flags
+        for section in self.sections:
+            # In sectioned text the header must start a line: a mid-line
+            # mention ("see [status]") does not start the section.
+            self._extraction_patterns[section] = re.compile(
+                rf"({header_re(section, line_start=True)}.*?){ends}", flags
+            )
+            # Free-text tiers ("USER: [deploy] failed") mention a section
+            # anywhere in a line.
+            self._mention_sources[section] = rf"({header_re(section)}.*?){ends}"
 
         self._id = hash((tuple(self.sections), self.section_header_format))
 
     def extraction_pattern(self, section: str) -> re.Pattern[str]:
+        """The section's block in sectioned text (state / notes / reference):
+        from a line-start header up to the next header line."""
         return self._extraction_patterns[section]
+
+    def mention_pattern(self, section: str) -> re.Pattern[str]:
+        """Like extraction_pattern(), but the header may appear mid-line —
+        used for the free-text tiers (cache / history) when scoring."""
+        pat = self._mention_patterns.get(section)
+        if pat is None:
+            pat = re.compile(self._mention_sources[section], self._flags)
+            self._mention_patterns[section] = pat
+        return pat
 
     def schema_id(self) -> int:
         return self._id
