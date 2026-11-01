@@ -93,6 +93,27 @@ def test_absent_section_scores_zero_even_with_matching_keywords():
     assert "audit" not in result.sections_excluded
 
 
+def test_query_matching_only_absent_sections_returns_nothing_not_everything(caplog):
+    before = fallback_counts().get("absent_only", 0)
+    with caplog.at_level(logging.WARNING, logger="deepcq"):
+        result = _cq().query("any audit findings?")
+    assert result.content == ""
+    assert result.sections_included == []
+    assert result.sections_absent == ["audit"]
+    assert result.explanations["audit"].absent_score >= 0.3
+    assert not result.fallback_used
+    assert fallback_counts()["absent_only"] == before + 1
+    assert any("not in memory" in r.message for r in caplog.records)
+
+
+def test_absent_only_query_still_returns_matching_history():
+    cq = _cq()
+    cq.history.add("user", "the audit findings are due friday")
+    result = cq.query("any audit findings?")
+    assert "audit findings are due friday" in result.content
+    assert not result.fallback_used
+
+
 # --- loud fallback -------------------------------------------------------------
 
 def test_fallback_is_flagged_logged_and_counted(caplog):

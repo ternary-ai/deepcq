@@ -22,10 +22,20 @@ _LOG_QUERY_CHARS = 80
 
 
 def fallback_counts() -> dict[str, int]:
-    """How often query() fell back to returning everything, by kind
-    ("no_section_scored", "no_section_present"), since process start or the
-    last reset_fallback_counts()."""
+    """How often query() took a fallback path, by kind, since process start
+    or the last reset_fallback_counts():
+
+    - "no_section_scored", "no_section_present": fallback_include_all
+      returned everything unfiltered.
+    - "absent_only": the query matched only sections that are not in memory,
+      so no section content was returned (and the include-all fallback was
+      deliberately not used).
+    """
     return dict(_FALLBACK_COUNTS)
+
+
+def _excerpt(query: str) -> str:
+    return query if len(query) <= _LOG_QUERY_CHARS else query[:_LOG_QUERY_CHARS] + "..."
 
 
 def reset_fallback_counts() -> None:
@@ -108,17 +118,30 @@ class DeepCQ:
         included = [sec for sec in present if intent[sec] >= self.schema.confidence_threshold]
         excluded = [sec for sec in present if sec not in included]
 
-        if not included and self.schema.fallback_include_all:
+        # The query asked about sections memory doesn't hold: the right answer
+        # is no section content, not everything — skip the include-all fallback.
+        absent_matched = [
+            sec for sec in absent
+            if explanations[sec].absent_score >= self.schema.confidence_threshold
+        ]
+        if not included and absent_matched:
+            _FALLBACK_COUNTS["absent_only"] += 1
+            logger.warning(
+                "deepcq: query %r matched only section(s) not in memory %s; returning "
+                "no section content (process total absent_only: %d)",
+                _excerpt(query), absent_matched, _FALLBACK_COUNTS["absent_only"],
+            )
+
+        if not included and not absent_matched and self.schema.fallback_include_all:
             kind = "no_section_scored" if present else "no_section_present"
             reason = (
                 f"no section scored >= {self.schema.confidence_threshold}"
                 if present else "no schema section is present in memory"
             )
             _FALLBACK_COUNTS[kind] += 1
-            excerpt = query if len(query) <= _LOG_QUERY_CHARS else query[:_LOG_QUERY_CHARS] + "..."
             logger.warning(
                 "deepcq: fallback_include_all — %s for query %r; returning all content "
-                "unfiltered (process total %s: %d)", reason, excerpt, kind, _FALLBACK_COUNTS[kind],
+                "unfiltered (process total %s: %d)", reason, _excerpt(query), kind, _FALLBACK_COUNTS[kind],
             )
             return QueryResult(
                 content=full_text,

@@ -53,7 +53,8 @@ def score_sections_detailed(
     decay_fn) that multiplies the section's score down based on age,
     evaluated against `now` (defaults to the current time).
 
-    A section found in no tier scores 0.0 with `present=False`.
+    A section found in no tier scores 0.0 with `present=False`; the score
+    its name/keywords alone would have given is kept as `absent_score`.
 
     `tiers` optionally maps tier names to the tier objects that produced
     `tier_texts`; their per-version cache then skips re-extracting and
@@ -156,8 +157,9 @@ def score_sections_detailed(
         # A section no tier contains has nothing to return; matches on its
         # name/keywords alone must not give it a passing score.
         present = len(sources) > 1
+        absent_score = 0.0
         if not present:
-            score = 0.0
+            absent_score, score = score, 0.0
             matched_tokens, matched_anchors, matched_phrases = [], [], []
             literal_hit, tier_contributions = False, {}
 
@@ -169,6 +171,7 @@ def score_sections_detailed(
             matched_phrases=matched_phrases,
             tier_contributions=tier_contributions,
             present=present,
+            absent_score=absent_score,
         )
 
     return explanations

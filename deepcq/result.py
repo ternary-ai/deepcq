@@ -16,6 +16,9 @@ class ScoreExplanation:
     tier_contributions: dict[str, float] = field(default_factory=dict)
     # False when no tier contains the section at all (score is then 0.0).
     present: bool = True
+    # For an absent section: the score its name/keywords alone gave the query
+    # (what it would have scored on the schema). 0.0 for present sections.
+    absent_score: float = 0.0
 
 
 @dataclass

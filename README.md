@@ -112,7 +112,10 @@ The section's score is the fraction of unique query tokens found in that
 vocabulary. Sections scoring at or above `schema.confidence_threshold`
 (default `0.3`) are "included". A section that no tier contains scores
 `0.0` (`ScoreExplanation.present` is `False`) and is listed in
-`sections_absent` — name/keyword matches alone never include it.
+`sections_absent` — name/keyword matches alone never include it. A query
+that matches only such absent sections returns no section content (it asks
+about data memory doesn't hold) rather than triggering the include-all
+fallback; this is logged and counted as `absent_only`.
 
 Literal anchors from the query (quoted phrases, numbers, percentages,
 identifiers, emoji) force a section's score to 1.0 when found in its text
@@ -225,7 +228,7 @@ silently discarding memory the agent might actually need.
 The fallback is never silent: the result has `fallback_used=True` and a
 `fallback_reason`, a warning is logged on the `"deepcq"` logger, and
 `deepcq.fallback_counts()` returns per-kind totals (`no_section_scored`,
-`no_section_present`) since process start or the last
+`no_section_present`, plus `absent_only` — see above) since process start or the last
 `deepcq.reset_fallback_counts()`. Check them before trusting a reduction
 number.
 
