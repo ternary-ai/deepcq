@@ -67,6 +67,12 @@ class MemorySchema:
         to its score (bonus only, total capped at 1.0). () (default) = off.
         Turning this on shifts scores — recalibrate thresholds after.
 
+    pinned:
+        Section names always included when present, even when they score
+        below `confidence_threshold` (reported in QueryResult.sections_pinned).
+        Pins don't count as a match: with nothing scoring above threshold,
+        fallback_include_all still applies.
+
     tier_weights / schema_weight:
         Per-tier weight for a token match, e.g. {"history": 0.5}. A query
         token counts at the highest weight among the places it was found
@@ -86,6 +92,7 @@ class MemorySchema:
     phrase_boost: float = 0.25
     tier_weights: dict[str, float] | None = None
     schema_weight: float = 1.0
+    pinned: Sequence[str] = ()
 
     def __post_init__(self) -> None:
         if self.tier_weights is not None:
@@ -100,6 +107,9 @@ class MemorySchema:
             raise ValueError(f"phrase_sizes must all be >= 2, got {self.phrase_sizes}")
         if self.phrase_boost < 0:
             raise ValueError("phrase_boost must be non-negative")
+        unknown_pins = [p for p in self.pinned if p not in self.sections]
+        if unknown_pins:
+            raise ValueError(f"pinned section(s) not in sections: {unknown_pins}")
 
         name_idx = self.section_header_format.index("{name}")
         self._prefix = self.section_header_format[:name_idx]
@@ -153,6 +163,19 @@ class MemorySchema:
 
         self._id = hash((tuple(self.sections), self.section_header_format))
 
+        # Any header line in this format, known to the schema or not, with its
+        # name — the same header-line rule that ends a section, so a data line
+        # like "[AAPL, MSFT]" is neither split on nor reported as unknown.
+        if self._suffix:
+            odd = [re.escape(s) for s in self.sections if not name_ok.match(s)]
+            name_re = rf"(?P<name>{'|'.join([*odd, _HEADER_NAME])})"
+            tail = rf"{re.escape(self._suffix)}(?=[ \t\r]|$)"
+        else:
+            name_re, tail = r"(?P<name>[^\n]+?)", r"[ \t\r]*$"
+        self._header_re = re.compile(
+            rf"^{re.escape(self._prefix)}{name_re}{tail}", re.MULTILINE | re.IGNORECASE
+        )
+
     def extraction_pattern(self, section: str) -> re.Pattern[str]:
         """The section's block in sectioned text (state / notes / reference):
         from a line-start header up to the next header line."""
@@ -169,3 +192,8 @@ class MemorySchema:
 
     def schema_id(self) -> int:
         return self._id
+
+    def header_pattern(self) -> re.Pattern[str]:
+        """Matches any line-start header in `section_header_format`, known to
+        the schema or not; the name is in group "name"."""
+        return self._header_re

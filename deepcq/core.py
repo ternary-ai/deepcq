@@ -5,6 +5,7 @@ import logging
 from collections import Counter
 
 from .schema import MemorySchema
+from .sections import split_sections
 from .intent import score_sections_detailed
 from .regex_gen import build_content_pattern, content_pattern_string
 from .result import QueryResult, OptimizationMetrics
@@ -19,6 +20,8 @@ logger = logging.getLogger("deepcq")
 _FALLBACK_COUNTS: Counter[str] = Counter()
 # Longest query excerpt written to the fallback warning.
 _LOG_QUERY_CHARS = 80
+# (schema id, header name) pairs already warned about as unknown.
+_WARNED_UNKNOWN: set[tuple[int, str]] = set()
 
 
 def fallback_counts() -> dict[str, int]:
@@ -115,8 +118,20 @@ class DeepCQ:
 
         absent = [sec for sec in self.schema.sections if not explanations[sec].present]
         present = [sec for sec in self.schema.sections if explanations[sec].present]
-        included = [sec for sec in present if intent[sec] >= self.schema.confidence_threshold]
+        scored = [sec for sec in present if intent[sec] >= self.schema.confidence_threshold]
+        pinned = [sec for sec in present if sec in self.schema.pinned and sec not in scored]
+        included = [sec for sec in present if sec in scored or sec in pinned]
         excluded = [sec for sec in present if sec not in included]
+
+        unknown = split_sections(tier_texts["state"], self.schema).unknown
+        for name in unknown:
+            key = (self.schema.schema_id(), name.lower())
+            if key not in _WARNED_UNKNOWN:
+                _WARNED_UNKNOWN.add(key)
+                logger.warning(
+                    "deepcq: section header %r in state is not in the schema; "
+                    "query() never returns its content", name,
+                )
 
         # The query asked about sections memory doesn't hold: the right answer
         # is no section content, not everything — skip the include-all fallback.
@@ -124,7 +139,7 @@ class DeepCQ:
             sec for sec in absent
             if explanations[sec].absent_score >= self.schema.confidence_threshold
         ]
-        if not included and absent_matched:
+        if not scored and absent_matched:
             _FALLBACK_COUNTS["absent_only"] += 1
             logger.warning(
                 "deepcq: query %r matched only section(s) not in memory %s; returning "
@@ -132,7 +147,7 @@ class DeepCQ:
                 _excerpt(query), absent_matched, _FALLBACK_COUNTS["absent_only"],
             )
 
-        if not included and not absent_matched and self.schema.fallback_include_all:
+        if not scored and not absent_matched and self.schema.fallback_include_all:
             kind = "no_section_scored" if present else "no_section_present"
             reason = (
                 f"no section scored >= {self.schema.confidence_threshold}"
@@ -156,6 +171,7 @@ class DeepCQ:
                 ),
                 explanations=explanations,
                 sections_absent=absent,
+                unknown_sections=unknown,
                 fallback_used=True,
                 fallback_reason=reason,
             )
@@ -200,5 +216,23 @@ class DeepCQ:
                 reduction_pct=reduction_pct,
             ),
             explanations=explanations,
+            sections_pinned=pinned,
             sections_absent=absent,
+            unknown_sections=unknown,
         )
+
+    def get_section(self, name: str, prefix: bool = True) -> str | None:
+        """
+        Return one stored section's text (header included), looked up
+        case-insensitively by full name, then by prefix ("news" → "News
+        (latest 10)"), in the state, notes and reference tiers. Finds
+        sections the schema doesn't declare too. None if there's no match.
+
+        Backs a "load an omitted section" tool for agents — see
+        QueryResult.omitted_note().
+        """
+        for tier in (self.state, self.notes, self.reference):
+            found = split_sections(tier.as_text(), self.schema).find(name, prefix=prefix)
+            if found:
+                return found.text
+        return None

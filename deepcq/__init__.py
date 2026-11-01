@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from importlib import import_module
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 _EXPORTS = {
     "DeepCQ": ("deepcq.core", "DeepCQ"),
@@ -28,6 +28,9 @@ _EXPORTS = {
     "CalibrationReport": ("deepcq.calibration", "CalibrationReport"),
     "calibrate": ("deepcq.calibration", "calibrate"),
     "TIER_NAMES": ("deepcq.schema", "TIER_NAMES"),
+    "Section": ("deepcq.sections", "Section"),
+    "SectionSplit": ("deepcq.sections", "SectionSplit"),
+    "split_sections": ("deepcq.sections", "split_sections"),
     "fallback_counts": ("deepcq.core", "fallback_counts"),
     "reset_fallback_counts": ("deepcq.core", "reset_fallback_counts"),
 }
@@ -40,6 +43,7 @@ __all__ = [
     "SynonymMap", "load_pack",
     "LabeledExample", "ThresholdStats", "CalibrationReport", "calibrate",
     "TIER_NAMES",
+    "Section", "SectionSplit", "split_sections",
     "fallback_counts", "reset_fallback_counts",
 ]
 

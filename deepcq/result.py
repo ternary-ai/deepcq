@@ -37,9 +37,26 @@ class QueryResult:
     content_pattern: str
     metrics: OptimizationMetrics
     explanations: dict[str, ScoreExplanation] = field(default_factory=dict)
+    # Included below threshold because MemorySchema.pinned lists them.
+    sections_pinned: list[str] = field(default_factory=list)
     # Schema sections no memory tier contains (not scored, not in excluded).
     sections_absent: list[str] = field(default_factory=list)
+    # Section headers found in the state tier whose name isn't in the schema —
+    # query() can never return their content.
+    unknown_sections: list[str] = field(default_factory=list)
     # True when fallback_include_all returned everything unfiltered; the
     # reason says why. Check this before trusting reduction numbers.
     fallback_used: bool = False
     fallback_reason: str | None = None
+
+    def omitted_note(self, reload_hint: str | None = None) -> str:
+        """
+        One line naming the sections that were present but left out, so an
+        LLM reading `content` doesn't conclude that data doesn't exist.
+        `reload_hint` is appended, e.g. 'Load one with get_section(name).'
+        Empty string when nothing was omitted.
+        """
+        if not self.sections_excluded:
+            return ""
+        note = f"Omitted as not relevant to this query: {', '.join(self.sections_excluded)}."
+        return f"{note} {reload_hint}" if reload_hint else note
