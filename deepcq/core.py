@@ -1,6 +1,9 @@
 """DeepCQ — main orchestrator."""
 from __future__ import annotations
 
+import logging
+from collections import Counter
+
 from .schema import MemorySchema
 from .intent import score_sections_detailed
 from .regex_gen import build_content_pattern, content_pattern_string
@@ -9,6 +12,25 @@ from .decay import Recency
 from .memory.state import AppState
 from .memory.session import SessionCache, History
 from .memory.store import LongTermStore, ReferenceData
+
+logger = logging.getLogger("deepcq")
+
+# Process-lifetime count of query() fallbacks, by reason kind.
+_FALLBACK_COUNTS: Counter[str] = Counter()
+# Longest query excerpt written to the fallback warning.
+_LOG_QUERY_CHARS = 80
+
+
+def fallback_counts() -> dict[str, int]:
+    """How often query() fell back to returning everything, by kind
+    ("no_section_scored", "no_section_present"), since process start or the
+    last reset_fallback_counts()."""
+    return dict(_FALLBACK_COUNTS)
+
+
+def reset_fallback_counts() -> None:
+    """Zero the fallback_counts() totals (e.g. per evaluation run or test)."""
+    _FALLBACK_COUNTS.clear()
 
 
 class DeepCQ:
@@ -81,19 +103,27 @@ class DeepCQ:
         )
         intent = {section: exp.score for section, exp in explanations.items()}
 
-        included: list[str] = []
-        excluded: list[str] = []
-        for section in self.schema.sections:
-            if intent.get(section, 0.0) >= self.schema.confidence_threshold:
-                included.append(section)
-            else:
-                excluded.append(section)
+        absent = [sec for sec in self.schema.sections if not explanations[sec].present]
+        present = [sec for sec in self.schema.sections if explanations[sec].present]
+        included = [sec for sec in present if intent[sec] >= self.schema.confidence_threshold]
+        excluded = [sec for sec in present if sec not in included]
 
         if not included and self.schema.fallback_include_all:
+            kind = "no_section_scored" if present else "no_section_present"
+            reason = (
+                f"no section scored >= {self.schema.confidence_threshold}"
+                if present else "no schema section is present in memory"
+            )
+            _FALLBACK_COUNTS[kind] += 1
+            excerpt = query if len(query) <= _LOG_QUERY_CHARS else query[:_LOG_QUERY_CHARS] + "..."
+            logger.warning(
+                "deepcq: fallback_include_all — %s for query %r; returning all content "
+                "unfiltered (process total %s: %d)", reason, excerpt, kind, _FALLBACK_COUNTS[kind],
+            )
             return QueryResult(
                 content=full_text,
                 intent=intent,
-                sections_included=list(self.schema.sections),
+                sections_included=present,
                 sections_excluded=[],
                 content_pattern=content_pattern_string(query),
                 metrics=OptimizationMetrics(
@@ -102,6 +132,9 @@ class DeepCQ:
                     reduction_pct=0.0,
                 ),
                 explanations=explanations,
+                sections_absent=absent,
+                fallback_used=True,
+                fallback_reason=reason,
             )
 
         parts: list[str] = []
@@ -142,4 +175,5 @@ class DeepCQ:
                 reduction_pct=reduction_pct,
             ),
             explanations=explanations,
+            sections_absent=absent,
         )

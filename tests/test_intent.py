@@ -170,9 +170,11 @@ def test_schema_custom_anchor_patterns_used_instead_of_defaults():
 # --- 0.3.0: parity net -------------------------------------------------------
 # Reference copy of the pre-0.3.0 scorer: tier texts concatenated into one
 # vocabulary, score = matched / query tokens, literal anchor forces 1.0.
+# Updated for the two intended 0.3.1 changes: anchors match whole words /
+# numbers only (anchor_in), and a section found in no tier scores 0.0.
 
 from deepcq.tokens import tokenize
-from deepcq.anchors import extract_literal_anchors
+from deepcq.anchors import anchor_in, extract_literal_anchors
 from deepcq.schema import TIER_NAMES
 from deepcq.vocabulary import SynonymMap
 
@@ -185,16 +187,20 @@ def _legacy_scores(query, schema, tier_texts):
         vocab = set(tokenize(section, include_stems=True))
         for kw in schema.keywords.get(section, []):
             vocab.update(tokenize(kw, include_stems=True))
-        section_text = ""
+        section_texts = []
         pat = schema.extraction_pattern(section)
         for text in tier_texts.values():
             if text and (m := pat.search(text)):
-                section_text += m.group(0)
+                section_texts.append(m.group(0))
                 vocab.update(tokenize(m.group(0), include_stems=True))
+        if not section_texts:
+            scores[section] = 0.0
+            continue
         token_score = (
             round(len(query_tokens & vocab) / len(query_tokens), 4) if query_tokens else 0.0
         )
-        scores[section] = 1.0 if any(a in section_text for a in anchors) else token_score
+        hit = any(anchor_in(a, t) for a in anchors for t in section_texts)
+        scores[section] = 1.0 if hit else token_score
     return scores
 
 
@@ -202,6 +208,7 @@ _PARITY_QUERIES = [
     "any cpu or memory issues?", "show me the latest errors", "is the service running?",
     'what about "OOM" at 02:15?', "what does 🚀 mean?", "timeout latency 120ms",
     "random words nothing", "", "postgres database queries", "78% cpu moving average",
+    "is 10 too high?", "8% cpu", "any audit findings?",
 ]
 
 _PARITY_FIXTURES = [
@@ -215,6 +222,12 @@ _PARITY_FIXTURES = [
             "notes": "[db]\nmigrated to postgres 16, moving average latency down",
             "reference": "[status] OOM at 02:15",
         },
+    ),
+    (
+        # "audit" is absent from every tier but has keywords; numbers that
+        # only occur inside longer numbers ("100", "2.10", "78%").
+        MemorySchema(sections=["metrics", "audit"], keywords={"audit": ["audit", "findings"]}),
+        {"state": "[metrics]\nlatency 100ms p99 2.10s CPU: 78%\n"},
     ),
 ]
 

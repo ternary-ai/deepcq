@@ -96,8 +96,11 @@ class MemorySchema:
         self._extraction_patterns: dict[str, re.Pattern[str]] = {}
         for section in self.sections:
             header = self.section_header_format.format(name=section)
+            # A header ending in a letter/digit must end there: "## SEC" must
+            # not match the header "## Sector".
+            boundary = r"(?![A-Za-z0-9_])" if header[-1:].isalnum() else ""
             pat = re.compile(
-                rf"({re.escape(header)}.*?){lookahead}",
+                rf"({re.escape(header)}{boundary}.*?){lookahead}",
                 re.DOTALL | re.IGNORECASE,
             )
             self._extraction_patterns[section] = pat

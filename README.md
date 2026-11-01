@@ -110,7 +110,18 @@ For each section in the schema, deepcq builds a vocabulary from:
 
 The section's score is the fraction of unique query tokens found in that
 vocabulary. Sections scoring at or above `schema.confidence_threshold`
-(default `0.3`) are "included".
+(default `0.3`) are "included". A section that no tier contains scores
+`0.0` (`ScoreExplanation.present` is `False`) and is listed in
+`sections_absent` — name/keyword matches alone never include it.
+
+Literal anchors from the query (quoted phrases, numbers, percentages,
+identifiers, emoji) force a section's score to 1.0 when found in its text
+as the exact figure or whole word: `"10"` matches `"top 10"` and the range
+`"10-15%"` but not `"100"`, `"2010"`, `"2.10"`, `"10.5"` or `"10-K"`;
+`"15%"` doesn't match `"115%"` or `"-15%"` (a leading minus sign is part of
+the figure). Matching is textual: `"1000"` doesn't match `"1,000"`. For
+number-heavy memory (financial data), pass `anchor_patterns=` without the
+number patterns.
 
 Extracted section text is cached on each tier object, keyed by a version
 counter that every mutating method bumps — repeated queries against
@@ -174,7 +185,8 @@ Sections are delimited in stored text by a header, `"[{name}]"` by default
 (configurable via `section_header_format`, e.g. `"## {name}"`). Each section
 compiles to a regex that captures from its header up to the next header or
 end of string — this is how `MemorySchema.extraction_pattern(section)` pulls
-a section's block out of raw tier text.
+a section's block out of raw tier text. A header ending in a letter or
+digit must end there, so `"## SEC"` doesn't match `"## Sector"`.
 
 For the two free-text tiers (`cache`, `history`, which aren't
 section-delimited), deepcq instead builds a single regex out of all query
@@ -194,8 +206,14 @@ class QueryResult:
     sections_excluded: list[str]
     content_pattern: str              # the regex used against cache/history
     metrics: OptimizationMetrics      # original_chars, filtered_chars, reduction_pct
-    explanations: dict[str, ScoreExplanation]  # matched tokens/anchors/phrases, tier_contributions
+    explanations: dict[str, ScoreExplanation]  # matched tokens/anchors/phrases, tier_contributions, present
+    sections_absent: list[str]        # in the schema, but in no tier
+    fallback_used: bool               # see "Fallback safety"
+    fallback_reason: str | None
 ```
+
+`sections_excluded` lists sections that are present but scored below
+threshold.
 
 ### Fallback safety
 
@@ -203,6 +221,13 @@ If no section clears the confidence threshold and
 `schema.fallback_include_all` is `True` (the default), `query()` returns the
 full unfiltered text instead of nothing — this prevents a vague query from
 silently discarding memory the agent might actually need.
+
+The fallback is never silent: the result has `fallback_used=True` and a
+`fallback_reason`, a warning is logged on the `"deepcq"` logger, and
+`deepcq.fallback_counts()` returns per-kind totals (`no_section_scored`,
+`no_section_present`) since process start or the last
+`deepcq.reset_fallback_counts()`. Check them before trusting a reduction
+number.
 
 ## Package layout
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Mapping
 from .schema import MemorySchema
 from .tokens import tokenize
-from .anchors import extract_literal_anchors
+from .anchors import anchor_in, extract_literal_anchors
 from .phrases import extract_phrases
 from .result import ScoreExplanation
 from .decay import Recency
@@ -44,13 +44,16 @@ def score_sections_detailed(
     A query also carries "literal anchors" (emoji/symbol runs, quoted
     phrases, numbers, identifiers — see anchors.py) that a tokenizer would
     otherwise drop. If a section's matched text in some tier contains one of
-    those anchors verbatim, the score is raised to that tier's weight (1.0
+    those anchors verbatim — as a whole word/number, see anchors.anchor_in —
+    the score is raised to that tier's weight (1.0
     by default) — this only ever raises a score, so it never affects
     queries without such anchors.
 
     `recency` optionally maps a section name to a Recency (timestamp +
     decay_fn) that multiplies the section's score down based on age,
     evaluated against `now` (defaults to the current time).
+
+    A section found in no tier scores 0.0 with `present=False`.
 
     `tiers` optionally maps tier names to the tier objects that produced
     `tier_texts`; their per-version cache then skips re-extracting and
@@ -138,7 +141,7 @@ def score_sections_detailed(
         for anchor in literal_anchors:
             hit_weights = [
                 min(1.0, weight) for name, weight, _, texts in sources
-                if name != SCHEMA_SOURCE and anchor in texts[0]
+                if name != SCHEMA_SOURCE and anchor_in(anchor, texts[0])
             ]
             if hit_weights:
                 matched_anchors.append(anchor)
@@ -150,6 +153,14 @@ def score_sections_detailed(
         if recency and section in recency:
             score = round(score * recency[section].multiplier(now), 4)
 
+        # A section no tier contains has nothing to return; matches on its
+        # name/keywords alone must not give it a passing score.
+        present = len(sources) > 1
+        if not present:
+            score = 0.0
+            matched_tokens, matched_anchors, matched_phrases = [], [], []
+            literal_hit, tier_contributions = False, {}
+
         explanations[section] = ScoreExplanation(
             score=score,
             matched_tokens=matched_tokens,
@@ -157,6 +168,7 @@ def score_sections_detailed(
             literal_hit=literal_hit,
             matched_phrases=matched_phrases,
             tier_contributions=tier_contributions,
+            present=present,
         )
 
     return explanations
