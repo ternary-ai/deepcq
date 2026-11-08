@@ -28,6 +28,9 @@ _EXPORTS = {
     "CalibrationReport": ("deepcq.calibration", "CalibrationReport"),
     "calibrate": ("deepcq.calibration", "calibrate"),
     "TIER_NAMES": ("deepcq.schema", "TIER_NAMES"),
+    "Section": ("deepcq.sections", "Section"),
+    "SectionSplit": ("deepcq.sections", "SectionSplit"),
+    "split_sections": ("deepcq.sections", "split_sections"),
     "fallback_counts": ("deepcq.core", "fallback_counts"),
     "reset_fallback_counts": ("deepcq.core", "reset_fallback_counts"),
     "gap_counts": ("deepcq.core", "gap_counts"),
@@ -47,6 +50,7 @@ __all__ = [
     "SynonymMap", "load_pack",
     "LabeledExample", "ThresholdStats", "CalibrationReport", "calibrate",
     "TIER_NAMES",
+    "Section", "SectionSplit", "split_sections",
     "fallback_counts", "reset_fallback_counts", "gap_counts", "reset_gap_counts",
     "SectionInfo", "MemoryGap", "SectionUsage", "UsageStats", "HealthReport",
 ]

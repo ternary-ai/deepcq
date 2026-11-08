@@ -7,6 +7,7 @@ from collections import Counter
 from dataclasses import replace
 
 from .schema import MemorySchema, validate_max_chars
+from .sections import split_sections
 from .intent import score_sections_detailed
 from .anchors import anchor_in, extract_literal_anchors
 from .regex_gen import build_content_pattern, content_pattern_string
@@ -25,6 +26,8 @@ _FALLBACK_COUNTS: Counter[str] = Counter()
 _GAP_COUNTS: Counter[str] = Counter()
 # (schema id, section, tier) duplicates already warned about.
 _WARNED_DUPLICATES: set[tuple[int, str, str]] = set()
+# (schema id, header name) pairs already warned about as unknown.
+_WARNED_UNKNOWN: set[tuple[int, str]] = set()
 # Longest query excerpt written to a log record (only with log_query_text=True).
 _LOG_QUERY_CHARS = 80
 
@@ -273,6 +276,22 @@ class DeepCQ:
         absent = [sec for sec in schema.sections if not explanations[sec].present]
         present = [sec for sec in schema.sections if explanations[sec].present]
         scored = [sec for sec in present if intent[sec] >= schema.confidence_threshold]
+        # Pinned sections are kept when present even below threshold, but
+        # don't count as a match (the fallback still applies without one).
+        pinned = [sec for sec in present if sec in schema.pinned and sec not in scored]
+
+        # Headers in state that the schema doesn't declare: query() can never
+        # return their content. Header names come from memory, so the log
+        # names them only with log_query_text; the result always lists them.
+        unknown = split_sections(tier_texts["state"], schema).unknown
+        new_unknown = [n for n in unknown if (schema.schema_id(), n.lower()) not in _WARNED_UNKNOWN]
+        if new_unknown:
+            _WARNED_UNKNOWN.update((schema.schema_id(), n.lower()) for n in new_unknown)
+            logger.warning(
+                "deepcq: %d section header(s) in state are not in the schema%s; query() never "
+                "returns their content (see QueryResult.unknown_sections)",
+                len(new_unknown), f" {new_unknown}" if self.log_query_text else "",
+            )
 
         # Duplicates: only the first copy of a section in a tier is used.
         duplicates = {
@@ -335,7 +354,7 @@ class DeepCQ:
                 order = by_score(present)
                 free = [t for t in _FREE_TEXT_TIERS if tier_texts[t]]
             else:
-                order = by_score(scored)
+                order = pinned + by_score(scored)
                 content_pat = build_content_pattern(query)
                 free = [t for t in _FREE_TEXT_TIERS if tier_texts[t] and content_pat.search(tier_texts[t])]
             kept, over, kept_tiers, over_tiers = self._select(order, pieces, free, tier_texts, budget)
@@ -357,7 +376,9 @@ class DeepCQ:
             )
 
         included = [sec for sec in schema.sections if sec in kept]
-        excluded = [] if fallback_used else [sec for sec in present if sec not in scored]
+        excluded = [] if fallback_used else [
+            sec for sec in present if sec not in scored and sec not in pinned
+        ]
 
         filtered_chars = len(content)
         reduction_pct = (
@@ -442,7 +463,25 @@ class DeepCQ:
             max_chars=budget,
             duplicate_sections=duplicates,
             gaps=gaps,
+            sections_pinned=[] if fallback_used else [sec for sec in pinned if sec in kept],
+            unknown_sections=unknown,
         )
+
+    def get_section(self, name: str, prefix: bool = True) -> str | None:
+        """
+        Return one stored section's text (header included), looked up
+        case-insensitively by full name, then by prefix ("news" → "News
+        (latest 10)"), in the state, notes and reference tiers. Finds
+        sections the schema doesn't declare too. None if there's no match.
+
+        Backs a "load an omitted section" tool for agents — see
+        QueryResult.omitted_note() and section_map().
+        """
+        for tier in (self.state, self.notes, self.reference):
+            found = split_sections(tier.as_text(), self.schema).find(name, prefix=prefix)
+            if found:
+                return found.text
+        return None
 
     # -- usage and health ----------------------------------------------------------
 

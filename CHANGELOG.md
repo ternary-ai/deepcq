@@ -38,6 +38,24 @@ memory and question always give the same result.
   hold only counts keyed by declared names — never query text or memory
   content — and never leave the instance. `health_report(min_count=k)`
   withholds small counts for shared instances.
+- **Pinned sections.** `MemorySchema(pinned=[...])` keeps sections whenever
+  present, even below threshold (`QueryResult.sections_pinned`). They go
+  first within the context budget but still obey it, and don't suppress
+  the fallback. Pinning an undeclared section raises `ValueError`.
+- **Unknown-section report.** `QueryResult.unknown_sections` lists headers
+  in the state tier that the schema doesn't declare, so a renamed header
+  can't silently drop data. Warned once per schema and name; the warning
+  gives a count, and names only with `log_query_text=True`.
+- **Section parser and lookup.** `split_sections(text, schema)` returns a
+  preamble plus `Section(name, text, known)` blocks; `DeepCQ.get_section()`
+  fetches one by name, then prefix, case-insensitively.
+- **Omitted-section note and reload tool.** `QueryResult.omitted_note()`
+  (the section map's omitted list plus an optional hint), and
+  `ToolContextProvider.get_context_with_note()`, `section_tool_spec()` and
+  `get_section()` in the ternary integration.
+- **Pre-chunked `locate()`.** Pass a list of strings: indices are list
+  positions, texts come back exactly as given, and blank entries are
+  skipped without shifting indices.
 - **Lexical misses.** `calibrate()` reports expected sections that shared
   no word, phrase or figure with the question (`lexical_misses`), which no
   threshold can reach.

@@ -38,6 +38,46 @@ class ToolContextProvider:
         """Return filtered memory content relevant to the query."""
         return self._cq.query(query).content
 
+    def get_context_with_note(self, query: str, reload_tool: str = "get_section") -> str:
+        """
+        Filtered memory content plus a line naming the sections left out and
+        how to load one — so the model neither assumes that data is missing
+        nor re-fetches it from elsewhere. Pair with section_tool_spec() and
+        get_section() to give the agent the reload tool the note refers to.
+        """
+        result = self._cq.query(query)
+        note = result.omitted_note(f'Load one with {reload_tool}(name="<section>").')
+        return f"{result.content}\n\n{note}" if note else result.content
+
+    def get_section(self, name: str) -> str:
+        """Tool handler for section_tool_spec(): one section's stored text."""
+        text = self._cq.get_section(name)
+        if text is not None:
+            return text
+        names = [s for s in self._cq.schema.sections]
+        return f"No section named {name!r}. Sections: {', '.join(names)}"
+
+    def section_tool_spec(self, name: str = "get_section") -> dict:
+        """
+        Function-calling definition (name / description / JSON-schema
+        parameters) for a tool that loads one omitted section via
+        get_section(). Rename the parameters key to `input_schema`
+        (Anthropic) or wrap as {"type": "function", "function": ...} (OpenAI).
+        """
+        return {
+            "name": name,
+            "description": (
+                "Load one memory section that was omitted from the context as not "
+                "relevant. Matches the section name case-insensitively, or by prefix. "
+                f"Sections: {', '.join(self._cq.schema.sections)}."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string", "description": "Section name or prefix"}},
+                "required": ["name"],
+            },
+        }
+
     def get_prompt_template(self, query: str, library: PromptLibrary) -> str:
         """
         Retrieve the best matching prompt template(s) from a PromptLibrary

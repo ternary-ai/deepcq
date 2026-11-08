@@ -79,6 +79,24 @@ class QueryResult:
     duplicate_sections: dict[str, list[str]] = field(default_factory=dict)
     # What the question asked for that memory doesn't hold (see gap_note()).
     gaps: list[MemoryGap] = field(default_factory=list)
+    # Included below threshold because MemorySchema.pinned lists them.
+    sections_pinned: list[str] = field(default_factory=list)
+    # Section headers found in the state tier whose name isn't in the schema —
+    # query() can never return their content.
+    unknown_sections: list[str] = field(default_factory=list)
+
+    def omitted_note(self, reload_hint: str | None = None) -> str:
+        """
+        The sections left out of `content` (below threshold or over budget),
+        as section_map(only_omitted=True) lists them, so an LLM reading
+        `content` doesn't conclude that data doesn't exist. `reload_hint` is
+        appended on its own line, e.g. 'Load one with get_section(name).'
+        "" when nothing was omitted.
+        """
+        note = self.section_map(only_omitted=True)
+        if not note:
+            return ""
+        return f"{note}\n{reload_hint}" if reload_hint else note
 
     def section_map(self, only_omitted: bool = False) -> str:
         """

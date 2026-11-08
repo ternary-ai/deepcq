@@ -448,10 +448,12 @@ def test_privacy_logs_carry_no_query_content(caplog):
         cq.query('any audit findings for "Jane Doe"?')             # absent_only + gaps
         cq.query("xyzzy 4417-1234")                                # fallback + gaps
         cq.query("errors", max_chars=5)                            # budget cut
+        cq.state.set("x", "[patient-778899]\nnotes\n")
+        cq.query("errors")                                         # unknown header
     with caplog.at_level(logging.DEBUG, logger="deepcq"):
         run(_cq())
     text = "\n".join(r.getMessage() for r in caplog.records)
-    for fragment in ("Jane", "4417", "xyzzy", "findings for"):
+    for fragment in ("Jane", "4417", "xyzzy", "findings for", "patient"):
         assert fragment not in text, fragment
     caplog.clear()
     with caplog.at_level(logging.DEBUG, logger="deepcq"):
@@ -520,3 +522,31 @@ def test_package_locate_is_the_function_even_after_submodule_import():
                           cwd=os.path.dirname(os.path.dirname(__file__)))
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == "0"
+
+
+# --- merged 0.3.2 primitives with the 0.4.0 budget ------------------------------------
+
+def test_pinned_sections_go_first_within_the_budget():
+    cq = _cq(pinned=["status"])
+    full = cq.query("show me the errors", max_chars=None)
+    assert full.sections_included == ["status", "errors"] and full.sections_pinned == ["status"]
+    tight = cq.query("show me the errors", max_chars=len("[status]\nAll services running"))
+    assert tight.sections_included == ["status"]
+    assert tight.sections_over_budget == ["errors"]
+
+
+def test_pinned_section_larger_than_budget_is_cut_and_reported():
+    cq = _cq(pinned=["status"])
+    result = cq.query("show me the errors", max_chars=len("[errors]\n- OOM at 02:15"))
+    assert result.sections_included == ["errors"]
+    assert result.sections_pinned == []
+    assert result.sections_over_budget == ["status"]
+    assert result.sections["status"].status == "over_budget"
+
+
+def test_locate_list_input_with_budget_keeps_positions():
+    chunks = ["revenue " * 10, "", "revenue memo", "weather"]
+    assert [c.index for c in locate(chunks, "revenue", max_chars=None)] == [0, 2]
+    found = locate(chunks, "revenue", max_chars=20)
+    assert [c.index for c in found] == [2]
+    assert found[0].text == chunks[2]

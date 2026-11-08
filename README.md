@@ -79,6 +79,9 @@ against `query`, and returns `Candidate(index, text, score)` objects for
 chunks at or above `confidence_threshold`, ordered by position in the
 original text. `text` is returned unmodified — no headers, no wrapping — so
 it's safe to use directly for verbatim matching against the source document.
+If your chunks already exist (tool results, chat turns), pass a list of
+strings instead: indices are positions in that list and no delimiter can
+misalign them.
 Pass `max_candidates` to cap the result to the highest-scoring chunks.
 
 ## How it works
@@ -131,6 +134,11 @@ as the exact figure or whole word: `"10"` matches `"top 10"` and the range
 the figure). Matching is textual: `"1000"` doesn't match `"1,000"`. For
 number-heavy memory (financial data), pass `anchor_patterns=` without the
 number patterns.
+
+`MemorySchema(pinned=[...])` always includes those sections when present,
+even below threshold (`sections_pinned`). Pinned sections go first within
+the context budget but still obey it: one too large to fit is cut and
+reported in `sections_over_budget`.
 
 Extracted section text is cached on each tier object, keyed by a version
 counter that every mutating method bumps — repeated queries against
@@ -212,6 +220,14 @@ section from a mention anywhere in a line (`"USER: [deploy] failed"`), via
 Returned pieces are joined with a single newline, like the original text,
 so the filtered content is never longer than the input.
 
+To rebuild filtered text yourself, `split_sections(text, schema)` splits
+text at every header in the schema's format into a preamble plus
+`Section(name, text, known)` blocks — including headers the schema doesn't
+declare, which `query()` reports in `unknown_sections` (and logs once)
+because it can never return their content. `cq.get_section(name)` returns
+one stored section by name or prefix, the handler for an agent's "load the
+section that was omitted" tool.
+
 For the two free-text tiers (`cache`, `history`, which aren't
 section-delimited), deepcq instead builds a single regex out of all query
 tokens and includes that tier's text only if any token matches
@@ -231,7 +247,9 @@ class QueryResult:
     content_pattern: str              # the regex used against cache/history
     metrics: OptimizationMetrics      # original_chars, filtered_chars, reduction_pct
     explanations: dict[str, ScoreExplanation]  # matched tokens/anchors/phrases, tier_contributions, present
+    sections_pinned: list[str]        # included below threshold via MemorySchema.pinned
     sections_absent: list[str]        # in the schema, but in no tier
+    unknown_sections: list[str]       # headers in state that the schema doesn't declare
     fallback_used: bool               # see "Fallback safety"
     fallback_reason: str | None
     sections: dict[str, SectionInfo]  # per section: status, score, chars, description
@@ -243,10 +261,11 @@ class QueryResult:
 
     def section_map(self, only_omitted=False) -> str
     def gap_note(self) -> str
+    def omitted_note(self, reload_hint=None) -> str  # section_map(only_omitted=True) + hint
 ```
 
 `sections_excluded` lists sections that are present but scored below
-threshold.
+threshold — exactly what the agent can ask to reload.
 
 ### Context budget (0.4.0)
 
@@ -321,7 +340,9 @@ a caller — with no per-query records, and they never leave the instance.
 For an instance shared by several users, use `health_report(min_count=5)`
 to withhold small counts, or `DeepCQ(..., track_usage=False)`. deepcq's log
 records likewise carry no query text or figures by default;
-`DeepCQ(..., log_query_text=True)` adds them for debugging.
+`DeepCQ(..., log_query_text=True)` adds them for debugging, along with the
+names of undeclared headers found in memory (which are always listed in
+`result.unknown_sections`).
 
 ### Measuring what word matching misses
 
@@ -366,6 +387,7 @@ deepcq/
 │   ├── phrases.py               # extract_phrases() for phrase-aware matching
 │   ├── calibration.py           # calibrate() threshold sweep
 │   ├── locate.py                # locate() chunk retrieval
+│   ├── sections.py              # split_sections(), Section, SectionSplit
 │   ├── tokens.py                # tokenize() / stem()
 │   ├── regex_gen.py              # query-token regex builder for free-text tiers
 │   ├── result.py                # QueryResult / OptimizationMetrics dataclasses
@@ -408,6 +430,12 @@ from deepcq.integrations.ternary import ToolContextProvider, PromptLibrary
 cq = DeepCQ(schema=MemorySchema(sections=["research", "risk-management"]))
 provider = ToolContextProvider(cq)
 context = provider.get_context("what is my portfolio concentration risk?")
+
+# Agents: name the omitted sections in the context and give the model a tool
+# to load one, instead of letting it assume the data doesn't exist.
+context = provider.get_context_with_note("what is my portfolio concentration risk?")
+tool = provider.section_tool_spec()       # {"name", "description", "parameters"}
+handler = provider.get_section            # call with the tool's `name` argument
 ```
 
 See `examples/openai_agents_sdk.py`, `examples/claude_agents_sdk.py`,

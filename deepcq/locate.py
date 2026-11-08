@@ -25,7 +25,7 @@ class Candidate:
 
 
 def locate(
-    text: str,
+    text: str | Sequence[str],
     query: str,
     chunk_on: str = "\n\n",
     confidence_threshold: float = 0.3,
@@ -36,6 +36,12 @@ def locate(
     max_chars: int | None = DEFAULT_MAX_CHARS,
 ) -> list[Candidate]:
     """
+    `text` is either one string, split on `chunk_on` (blank chunks dropped,
+    the rest stripped; indices count the kept chunks), or an already-chunked
+    sequence of strings — then `chunk_on` is ignored, each Candidate.index is
+    the position in that sequence, its text is returned exactly as given, and
+    blank entries are skipped without shifting indices.
+
     `recency` optionally maps a chunk *index* (not the internal section
     name) to a Recency that time-weights that chunk's score — see
     decay.py. `anchor_patterns` overrides the literal-anchor patterns used
@@ -48,11 +54,14 @@ def locate(
     first, then the budget. The result stays sorted by index.
     """
     validate_max_chars(max_chars)
-    chunks = [c.strip() for c in text.split(chunk_on) if c.strip()]
+    if isinstance(text, str):
+        chunks = dict(enumerate(c.strip() for c in text.split(chunk_on) if c.strip()))
+    else:
+        chunks = {i: c for i, c in enumerate(text) if c and c.strip()}
     if not chunks:
         return []
 
-    names = [f"chunk_{i}" for i in range(len(chunks))]
+    names = [f"chunk_{i}" for i in chunks]
     schema = MemorySchema(
         sections=names,
         section_header_format=_CHUNK_HEADER_FORMAT,
@@ -65,7 +74,7 @@ def locate(
     # reports — the text being searched isn't stored memory.
     cq = DeepCQ(schema=schema, track_usage=False)
     cq._report_gaps = False
-    for i, c in enumerate(chunks):
+    for i, c in chunks.items():
         cq.state.set(f"chunk_{i}", f"{_CHUNK_HEADER_FORMAT.format(name=f'chunk_{i}')}\n{c}")
 
     _recency_by_name = (
