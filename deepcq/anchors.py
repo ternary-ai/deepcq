@@ -30,6 +30,10 @@ VERSION_PATTERN = re.compile(_SIGN + r"\bv?\d+(?:\.\d+){1,3}\b")
 PERCENTAGE_PATTERN = re.compile(_SIGN + r"\b\d+(?:\.\d+)?%")
 # Hyphen/underscore identifier-like tokens: "circuit-breaker-v2", "user_id_9".
 IDENTIFIER_PATTERN = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)+\b")
+# Identifiers that start with a digit: filing forms and the like ("10-K",
+# "8-K", "10-Q"). A hyphenated part must start with a letter, so ranges
+# ("10-15%") and dates ("2024-10-05") are left to the number patterns.
+DIGIT_IDENTIFIER_PATTERN = re.compile(r"\b\d+(?:-[A-Za-z][A-Za-z0-9]*)+\b")
 # Standalone numbers worth anchoring on: decimals, or 2+ digit integers.
 # Single digits are excluded — too common to be a useful literal anchor.
 NUMBER_PATTERN = re.compile(_SIGN + r"(?:\b\d+\.\d+\b|\b\d{2,}\b)")
@@ -40,6 +44,7 @@ DEFAULT_ANCHOR_PATTERNS: tuple[re.Pattern[str], ...] = (
     VERSION_PATTERN,
     PERCENTAGE_PATTERN,
     IDENTIFIER_PATTERN,
+    DIGIT_IDENTIFIER_PATTERN,
     NUMBER_PATTERN,
 )
 

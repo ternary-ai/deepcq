@@ -192,8 +192,11 @@ def test_fallback_with_empty_memory_has_its_own_kind():
 
 
 def test_fallback_warning_truncates_long_query(caplog):
+    # 0.4.0: query text is logged only with log_query_text=True.
+    cq = _cq()
+    cq.log_query_text = True
     with caplog.at_level(logging.WARNING, logger="deepcq"):
-        _cq().query("xyzzy " * 100)
+        cq.query("xyzzy " * 100)
     message = next(r.getMessage() for r in caplog.records if "fallback_include_all" in r.message)
     assert "xyzzy " * 20 not in message
     assert "..." in message
