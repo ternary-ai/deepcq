@@ -28,9 +28,13 @@ QUOTED_PATTERN = re.compile(
 # different figures. A hyphen after a letter/digit is a range or compound
 # ("10-15%", "Q3-2024"), not a sign, and is not captured.
 _SIGN = r"(?:(?<![A-Za-z0-9.,])[-\u2212])?"
-# Numbers with comma groups or a decimal comma, kept whole: "1,250,000",
-# "1,250.50", "3,5%". Split, their parts ("250", "000") match nothing.
-GROUPED_NUMBER_PATTERN = re.compile(_SIGN + r"\b\d+(?:,\d+)+(?:\.\d+)?%?")
+# One figure written with commas, kept whole: thousands groups ("1,250,000",
+# "1,250.50") or a single decimal comma ("3,5%"). Split, their parts ("250",
+# "000") match nothing. Anything else with commas is a list ("10,20,30") and
+# is left to the number patterns, one anchor per item.
+GROUPED_NUMBER_PATTERN = re.compile(
+    _SIGN + r"(?<!\d,)\b(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+,\d+)(?![,.]?\d)%?"
+)
 # Dotted version-like strings: "v2.3.1", "1.0.0".
 VERSION_PATTERN = re.compile(_SIGN + r"\bv?\d+(?:\.\d+){1,3}\b")
 # "42%", "3.5%" — checked before NUMBER_PATTERN so the '%' is kept.

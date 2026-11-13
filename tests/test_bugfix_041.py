@@ -62,6 +62,15 @@ def test_grouped_numbers_are_one_anchor(query, anchor):
     assert extract_literal_anchors(query) == [anchor]
 
 
+@pytest.mark.parametrize("query, anchors", [
+    ("scores 10,20,30", ["10", "20", "30"]),
+    ("ids 10,20,30,40", ["10", "20", "30", "40"]),
+    ("1,250,000 and 3,5%", ["1,250,000", "3,5%"]),
+])
+def test_comma_lists_split_into_items(query, anchors):
+    assert extract_literal_anchors(query) == anchors
+
+
 def test_grouped_number_matches_only_the_same_figure():
     assert anchor_in("1,250,000", "revenue: 1,250,000 USD")
     assert not anchor_in("1,250,000", "revenue: 11,250,000 USD")

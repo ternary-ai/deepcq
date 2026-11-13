@@ -30,7 +30,8 @@ other scores are unchanged.
 3. **Numbers with comma groups or a decimal comma stay whole.** "1,250,000"
    was split into the anchors "250" and "000", which matched nothing, so
    the section holding it wasn't found and the gap note named the pieces.
-   "3,5%" became "5%". Both are now one anchor.
+   "3,5%" became "5%". Both are now one anchor. A comma list such as
+   "10,20,30" is still one anchor per item.
 4. **A corrupt `LongTermStore` or `ReferenceData` file raises
    `ValueError`.** Before, a file that wasn't valid JSON (or wasn't a JSON
    object) loaded as empty memory without a warning, and the next write
