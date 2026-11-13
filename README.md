@@ -101,6 +101,12 @@ Pass `max_candidates` to cap the result to the highest-scoring chunks.
 Each tier renders itself to text via `as_text()`. `DeepCQ.query()` pulls text
 from all five tiers before scoring.
 
+File-backed stores (`store_path`, `reference_path`) save atomically: a crash
+mid-save leaves the previous file intact. A corrupt store file raises
+`ValueError` on load instead of being treated as empty. **Only one process
+should write to a store file at a time:** each process keeps its own copy in
+memory, so two writers overwrite each other's entries.
+
 ### 2. Tokenizing the query (`tokens.py`)
 
 The query is lowercased, split into words, stripped of stopwords, and each
