@@ -9,8 +9,12 @@ interfaces by duck-typing so they work without installing any extras.
 """
 from __future__ import annotations
 
+import logging
+
 from deepcq import DeepCQ
 from .prompt_library import PromptLibrary
+
+logger = logging.getLogger("deepcq")
 
 
 class ToolContextProvider:
@@ -151,9 +155,14 @@ class LangChainMemoryAdapter:
         must have the key matching memory_key (default "history").
         """
         query = inputs.get("input") or inputs.get("human_input") or ""
-        result = self._cq.query(query) if query else None
-        content = result.content if result else self._cq.history.as_text()
-        return {self.memory_key: content}
+        if query:
+            return {self.memory_key: self._cq.query(query).content}
+        total = self._cq._count_fallback("no_query")
+        logger.warning(
+            "deepcq: load_memory_variables got no input; returning the full history "
+            "unfiltered (process total no_query: %d)", total,
+        )
+        return {self.memory_key: self._cq.history.as_text()}
 
     def clear(self) -> None:
         """Reset History and SessionCache (analogous to LangChain memory.clear())."""

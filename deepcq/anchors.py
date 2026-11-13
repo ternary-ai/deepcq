@@ -19,11 +19,18 @@ EMOJI_SYMBOL_PATTERN = re.compile(
     "[\U0001F1E6-\U0001F1FF\U0001F300-\U0001FAFF\U00002190-\U000021FF"
     "\U00002600-\U000027BF\U00002B00-\U00002BFF‍️]+"
 )
-QUOTED_PATTERN = re.compile(r'"([^"\n]{2,80})"|\'([^\'\n]{2,80})\'|“([^”\n]{2,80})”')
+# Single quotes only count when no letter/digit touches them on the outside,
+# so apostrophes ("what's the user's plan") never form a quoted phrase.
+QUOTED_PATTERN = re.compile(
+    r'"([^"\n]{2,80})"|(?<!\w)\'([^\'\n]{2,80})\'(?!\w)|“([^”\n]{2,80})”'
+)
 # Optional leading minus sign on a number: kept, since "-15%" and "15%" are
 # different figures. A hyphen after a letter/digit is a range or compound
 # ("10-15%", "Q3-2024"), not a sign, and is not captured.
 _SIGN = r"(?:(?<![A-Za-z0-9.,])[-\u2212])?"
+# Numbers with comma groups or a decimal comma, kept whole: "1,250,000",
+# "1,250.50", "3,5%". Split, their parts ("250", "000") match nothing.
+GROUPED_NUMBER_PATTERN = re.compile(_SIGN + r"\b\d+(?:,\d+)+(?:\.\d+)?%?")
 # Dotted version-like strings: "v2.3.1", "1.0.0".
 VERSION_PATTERN = re.compile(_SIGN + r"\bv?\d+(?:\.\d+){1,3}\b")
 # "42%", "3.5%" — checked before NUMBER_PATTERN so the '%' is kept.
@@ -41,6 +48,7 @@ NUMBER_PATTERN = re.compile(_SIGN + r"(?:\b\d+\.\d+\b|\b\d{2,}\b)")
 DEFAULT_ANCHOR_PATTERNS: tuple[re.Pattern[str], ...] = (
     EMOJI_SYMBOL_PATTERN,
     QUOTED_PATTERN,
+    GROUPED_NUMBER_PATTERN,
     VERSION_PATTERN,
     PERCENTAGE_PATTERN,
     IDENTIFIER_PATTERN,
@@ -115,10 +123,11 @@ def _anchor_regex(anchor: str) -> re.Pattern[str]:
         # Not followed by more decimals ("10.5") or a word ("10-K", "10-year");
         # a range ("10-15%") still matches.
         right += r"(?![.,]\d)(?!-[A-Za-z])"
-    return re.compile(left + re.escape(anchor) + right)
+    # Case-insensitive: "10-k" asks about "10-K", "form 10-k" about "Form 10-K".
+    return re.compile(left + re.escape(anchor) + right, re.IGNORECASE)
 
 
 def anchor_in(anchor: str, text: str) -> bool:
-    """True if `anchor` occurs in `text` verbatim and not as part of a longer
-    word or number (see _anchor_regex)."""
+    """True if `anchor` occurs in `text` (ignoring case) and not as part of a
+    longer word or number (see _anchor_regex)."""
     return _anchor_regex(anchor).search(text) is not None

@@ -5,6 +5,23 @@ from pathlib import Path
 from ._vocab_cache import VocabCache
 
 
+def _read_json_dict(path: Path) -> dict:
+    """Load a store file. A file that can't be read or isn't a JSON object
+    raises: loading it as empty memory would hide the data, and the next
+    write would overwrite the file with nothing in it."""
+    text = path.read_text()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"deepcq: {path} is not valid JSON ({e}); refusing to load it as empty "
+            "memory, which the next write would save over the file"
+        ) from e
+    if not isinstance(data, dict):
+        raise ValueError(f"deepcq: {path} holds a JSON {type(data).__name__}, expected an object")
+    return data
+
+
 class LongTermStore(VocabCache):
     """T4 — Persistent, append-only notes store. File-backed when path given."""
 
@@ -37,10 +54,7 @@ class LongTermStore(VocabCache):
         return "\n".join(parts)
 
     def _load(self) -> None:
-        try:
-            self._data = json.loads(self._path.read_text())
-        except (json.JSONDecodeError, OSError):
-            self._data = {}
+        self._data = _read_json_dict(self._path)
 
     def _save(self) -> None:
         if self._path:
@@ -64,10 +78,7 @@ class ReferenceData(VocabCache):
     def _ensure_loaded(self) -> None:
         if self._data is None:
             if self._path and self._path.exists():
-                try:
-                    self._data = json.loads(self._path.read_text())
-                except (json.JSONDecodeError, OSError):
-                    self._data = {}
+                self._data = _read_json_dict(self._path)
             else:
                 self._data = {}
 

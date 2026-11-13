@@ -14,6 +14,39 @@
 - `health_report()` skips the oversized check (and lists it in `skipped`)
   unless `max_chars` or `max_section_chars` is set.
 
+### Fixed
+
+Three of these made the gap note tell the model that memory lacked data
+it held. Fixes 2, 3 and 6 change scores for the queries they affect;
+other scores are unchanged.
+
+1. **Apostrophes no longer form a quoted phrase.** In "what's the user's
+   plan", `'s the user'` was taken as a quoted anchor and reported as
+   "No stored memory mentions". A single quote now counts only when no
+   letter or digit touches it on the outside.
+2. **Figures and identifiers match regardless of case.** "10-k" in a
+   question now matches "10-K" in memory, and a quoted "form 10-k" matches
+   "Form 10-K". Before, both were reported as missing.
+3. **Numbers with comma groups or a decimal comma stay whole.** "1,250,000"
+   was split into the anchors "250" and "000", which matched nothing, so
+   the section holding it wasn't found and the gap note named the pieces.
+   "3,5%" became "5%". Both are now one anchor.
+4. **A corrupt `LongTermStore` or `ReferenceData` file raises
+   `ValueError`.** Before, a file that wasn't valid JSON (or wasn't a JSON
+   object) loaded as empty memory without a warning, and the next write
+   overwrote it, losing every stored entry. The file is now left as it is.
+5. **Pinned sections aren't reported as never included.** A pinned section
+   below threshold was counted as excluded, so `health_report()` listed it
+   in `never_included` although it reached every prompt. It now has its own
+   counter, `SectionUsage.pinned`; a pinned section cut by the budget counts
+   as `over_budget`.
+6. **Words with non-ASCII letters stay whole.** The tokenizer split on
+   anything outside A–Z, so "Kündigungen" became "ndigungen" and "Größe"
+   became "gr". Words in any script are now one token.
+7. **`LangChainMemoryAdapter.load_memory_variables()` with no input is
+   logged.** It returns the full history unfiltered, as before, and now
+   logs a warning and counts it as the fallback kind `no_query`.
+
 ## 0.4.0 — 2026-11-13
 
 deepcq decides which parts of an agent's working memory go into the

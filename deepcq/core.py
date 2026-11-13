@@ -51,6 +51,8 @@ def fallback_counts() -> dict[str, int]:
       passed the threshold (query() or locate()).
     - "duplicate_section": a section had more than one copy in one tier; only
       the first was used.
+    - "no_query": LangChainMemoryAdapter.load_memory_variables() got no
+      input and returned the full history unfiltered.
     """
     return dict(_FALLBACK_COUNTS)
 
@@ -435,6 +437,11 @@ class DeepCQ:
                             usage.literal_hits += 1
                     elif sec in scored:
                         usage.over_budget += 1
+                    elif sec in pinned and not fallback_used:
+                        if sec in kept:
+                            usage.pinned += 1
+                        else:
+                            usage.over_budget += 1
                     else:
                         usage.excluded += 1
                 else:
@@ -537,7 +544,9 @@ class DeepCQ:
         if self.track_usage:
             for sec in schema.sections:
                 usage = self._usage[sec]
-                if usage.queries >= min_queries and usage.included == 0:
+                # A pinned section reaches the context without matching, so
+                # it is never "never included" while its pin is used.
+                if usage.queries >= min_queries and usage.included == 0 and usage.pinned == 0:
                     report.never_included.append(sec)
                 if usage.queries >= min_queries and usage.included == usage.queries:
                     report.always_included.append(sec)

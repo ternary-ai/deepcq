@@ -315,7 +315,7 @@ def test_usage_counters_per_status():
     usage = cq.usage()
     assert usage.queries == 3
     assert dataclasses.asdict(usage.sections["big"]) == dict(
-        queries=3, included=1, excluded=1, over_budget=1, absent=0, requested_absent=0, literal_hits=0)
+        queries=3, included=1, excluded=1, over_budget=1, pinned=0, absent=0, requested_absent=0, literal_hits=0)
     assert usage.sections["other"].included == 1
     assert usage.fallbacks["budget_cut"] == 1
     assert usage.gaps["unmatched_anchor"] == 1
