@@ -39,7 +39,9 @@ other scores are unchanged.
    Saves are also atomic now: the JSON goes to a temporary file next to the
    store, is flushed to disk, and replaces the store with `os.replace()`. A
    crash, kill or full disk mid-save leaves the previous file intact instead
-   of a half-written one. The file keeps its permissions.
+   of a half-written one. The file keeps its permissions, a symlinked
+   store is written through to its target, and a notes file whose entries
+   aren't lists of strings is rejected on load.
 5. **Pinned sections aren't reported as never included.** A pinned section
    below threshold was counted as excluded, so `health_report()` listed it
    in `never_included` although it reached every prompt. It now has its own

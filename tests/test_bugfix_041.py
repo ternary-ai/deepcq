@@ -210,3 +210,28 @@ def test_atomic_write_keeps_file_mode(tmp_path):
     umask = os.umask(0)
     os.umask(umask)
     assert stat.S_IMODE(new.stat().st_mode) == 0o666 & ~umask
+
+
+def test_atomic_write_keeps_symlink_and_writes_target(tmp_path):
+    real = tmp_path / "real.json"
+    real.write_text(json.dumps({"a": ["x"]}))
+    link = tmp_path / "notes.json"
+    link.symlink_to(real)
+    LongTermStore(link).append("a", "y")
+    assert link.is_symlink()
+    assert json.loads(real.read_text()) == {"a": ["x", "y"]}
+
+
+def test_atomic_write_never_changes_process_umask(tmp_path, monkeypatch):
+    import os
+    calls = []
+    monkeypatch.setattr(os, "umask", lambda *a: calls.append(a) or 0o022)
+    LongTermStore(tmp_path / "new.json").append("a", "x")
+    assert calls == []
+
+
+def test_notes_file_with_wrong_shape_raises(tmp_path):
+    path = tmp_path / "notes.json"
+    path.write_text(json.dumps({"a": "not a list"}))
+    with pytest.raises(ValueError, match="not lists of strings"):
+        LongTermStore(path)
