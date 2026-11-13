@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 — unreleased
+## 0.4.0 — 2026-11-13
 
 deepcq decides which parts of an agent's working memory go into the
 context. This release makes that selection bounded, explained and honest
