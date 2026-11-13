@@ -1,7 +1,7 @@
 """Threshold calibration — pick `confidence_threshold` from labeled examples
 instead of sweeping and eyeballing by hand."""
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Sequence
 from .core import DeepCQ
 
@@ -35,6 +35,12 @@ class CalibrationReport:
     # `best` fell back to the unconstrained F1-best threshold.
     constraint_met: bool = True
     min_precision: float | None = None
+    # Expected sections that shared no word, phrase or anchor with the
+    # query: unreachable at any threshold, so tuning can't fix them — add
+    # schema descriptions or keywords instead.
+    lexical_misses: int = 0
+    lexical_miss_examples: list[tuple[int, str]] = field(default_factory=list)  # (example index, section)
+    expected_total: int = 0
 
     def summary(self) -> str:
         """Pretty-printed table: threshold | precision | recall | f1."""
@@ -47,6 +53,12 @@ class CalibrationReport:
             lines.append(
                 f"{s.threshold:9.2f} | {s.precision:9.3f} | {s.recall:6.3f} | {s.f1:6.3f} "
                 f"| {s.true_positives:3d} | {s.false_positives:3d} | {s.false_negatives:3d}{marker}"
+            )
+        if self.expected_total:
+            pct = round(100 * self.lexical_misses / self.expected_total)
+            lines.append(
+                f"lexical misses: {self.lexical_misses} of {self.expected_total} "
+                f"expected sections ({pct}%)"
             )
         if self.min_precision is not None and not self.constraint_met:
             lines.append(
@@ -92,6 +104,8 @@ def calibrate(
         raise ValueError("calibrate() needs at least one threshold")
 
     scored: list[tuple[dict[str, float], set[str]]] = []
+    misses: list[tuple[int, str]] = []
+    expected_total = 0
     for i, example in enumerate(examples):
         cq = example.build()
         unknown = set(example.expected_sections) - set(cq.schema.sections)
@@ -101,6 +115,11 @@ def calibrate(
             )
         result = cq.query(example.query)
         scored.append((result.intent, set(example.expected_sections)))
+        for section in sorted(example.expected_sections, key=list(cq.schema.sections).index):
+            expected_total += 1
+            exp = result.explanations[section]
+            if not exp.matched_tokens and not exp.matched_phrases and not exp.literal_hit:
+                misses.append((i, section))
 
     stats: list[ThresholdStats] = []
     for t in sorted(thresholds):
@@ -112,14 +131,15 @@ def calibrate(
             fn += len(expected - included)
         stats.append(_stats(t, tp, fp, fn))
 
+    miss_info = dict(lexical_misses=len(misses), lexical_miss_examples=misses, expected_total=expected_total)
     f1_best = max(stats, key=lambda s: (s.f1, s.threshold))
     if min_precision is None:
-        return CalibrationReport(stats=stats, best=f1_best)
+        return CalibrationReport(stats=stats, best=f1_best, **miss_info)
 
     qualifying = [s for s in stats if s.true_positives and s.precision >= min_precision]
     if not qualifying:
         return CalibrationReport(
-            stats=stats, best=f1_best, constraint_met=False, min_precision=min_precision
+            stats=stats, best=f1_best, constraint_met=False, min_precision=min_precision, **miss_info
         )
     best = max(qualifying, key=lambda s: (s.recall, s.threshold))
-    return CalibrationReport(stats=stats, best=best, min_precision=min_precision)
+    return CalibrationReport(stats=stats, best=best, min_precision=min_precision, **miss_info)

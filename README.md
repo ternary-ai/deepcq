@@ -4,14 +4,20 @@
 
 *Remember when it matters.*
 
-deepcq sits between an agent's memory and its prompt. Instead of stuffing an
+deepcq decides which parts of an agent's working memory go into the context.
+It sits between an agent's memory and its prompt: instead of stuffing an
 entire memory blob into every LLM call, it scores which sections of memory
-are actually relevant to the current query and returns only those — cutting
-prompt size while keeping recall.
+are relevant to the current question and returns only those — within a
+context budget, with every inclusion explained and every gap reported.
 
-No embeddings, no vector store, no external dependencies. Relevance is
-computed from the query's own tokens against text already in memory, using
-plain regex and a lightweight stemmer.
+No embeddings, no vector store, no model call, no external dependencies.
+Relevance is computed from the query's own words and figures against text
+already in memory, using plain regex and a lightweight stemmer, so the same
+memory and the same question always give the same result.
+
+deepcq is a read layer. It works underneath model-driven memory systems
+(which decide what to write and keep it correct) and makes the per-question
+selection fast, deterministic and auditable.
 
 ## Install
 
@@ -73,6 +79,9 @@ against `query`, and returns `Candidate(index, text, score)` objects for
 chunks at or above `confidence_threshold`, ordered by position in the
 original text. `text` is returned unmodified — no headers, no wrapping — so
 it's safe to use directly for verbatim matching against the source document.
+If your chunks already exist (tool results, chat turns), pass a list of
+strings instead: indices are positions in that list and no delimiter can
+misalign them.
 Pass `max_candidates` to cap the result to the highest-scoring chunks.
 
 ## How it works
@@ -125,6 +134,11 @@ as the exact figure or whole word: `"10"` matches `"top 10"` and the range
 the figure). Matching is textual: `"1000"` doesn't match `"1,000"`. For
 number-heavy memory (financial data), pass `anchor_patterns=` without the
 number patterns.
+
+`MemorySchema(pinned=[...])` always includes those sections when present,
+even below threshold (`sections_pinned`). Pinned sections go first within
+the context budget but still obey it: one too large to fit is cut and
+reported in `sections_over_budget`.
 
 Extracted section text is cached on each tier object, keyed by a version
 counter that every mutating method bumps — repeated queries against
@@ -206,6 +220,14 @@ section from a mention anywhere in a line (`"USER: [deploy] failed"`), via
 Returned pieces are joined with a single newline, like the original text,
 so the filtered content is never longer than the input.
 
+To rebuild filtered text yourself, `split_sections(text, schema)` splits
+text at every header in the schema's format into a preamble plus
+`Section(name, text, known)` blocks — including headers the schema doesn't
+declare, which `query()` reports in `unknown_sections` (and logs once)
+because it can never return their content. `cq.get_section(name)` returns
+one stored section by name or prefix, the handler for an agent's "load the
+section that was omitted" tool.
+
 For the two free-text tiers (`cache`, `history`, which aren't
 section-delimited), deepcq instead builds a single regex out of all query
 tokens and includes that tier's text only if any token matches
@@ -225,25 +247,124 @@ class QueryResult:
     content_pattern: str              # the regex used against cache/history
     metrics: OptimizationMetrics      # original_chars, filtered_chars, reduction_pct
     explanations: dict[str, ScoreExplanation]  # matched tokens/anchors/phrases, tier_contributions, present
+    sections_pinned: list[str]        # included below threshold via MemorySchema.pinned
     sections_absent: list[str]        # in the schema, but in no tier
+    unknown_sections: list[str]       # headers in state that the schema doesn't declare
     fallback_used: bool               # see "Fallback safety"
     fallback_reason: str | None
+    sections: dict[str, SectionInfo]  # per section: status, score, chars, description
+    sections_over_budget: list[str]   # passed the threshold, cut by max_chars
+    tiers_over_budget: list[str]      # "cache" / "history" cut by max_chars
+    max_chars: int | None             # the budget this result was built under
+    duplicate_sections: dict[str, list[str]]  # section -> tiers holding it twice
+    gaps: list[MemoryGap]             # what memory doesn't hold
+
+    def section_map(self, only_omitted=False) -> str
+    def gap_note(self) -> str
+    def omitted_note(self, reload_hint=None) -> str  # section_map(only_omitted=True) + hint
 ```
 
 `sections_excluded` lists sections that are present but scored below
-threshold.
+threshold — exactly what the agent can ask to reload.
+
+### Context budget (0.4.0)
+
+`query()` returns at most `MemorySchema.max_chars` characters of content —
+25,000 by default (about 6,000 English tokens), counting the separators.
+Sections that pass the threshold are kept highest score first; a section
+that doesn't fit is skipped whole, never truncated, and smaller relevant
+sections below it still get in. Then cache and history, if they fit.
+Content keeps its usual order. Cut sections are listed in
+`sections_over_budget` (free-text tiers in `tiers_over_budget`), logged, and
+counted as `budget_cut`. Override per call with `query(..., max_chars=n)`;
+`None` turns the budget off. `locate()` takes the same `max_chars`.
+
+### Section descriptions and the section map (0.4.0)
+
+```python
+schema = MemorySchema(
+    sections=["positions", "risk", "news"],
+    descriptions={"positions": "current holdings and sector exposure",
+                  "risk": "position limits and drawdown history"},
+)
+result = cq.query("are we overexposed to tech?")
+print(result.section_map(only_omitted=True))
+# Not loaded (ask for any of these by name):
+# - risk (1,240 chars, not loaded): position limits and drawdown history
+```
+
+A description says what a section holds, in the words people ask with. Its
+words join the section's scoring vocabulary (turn off with
+`score_descriptions=False`), which bridges everyday questions to stored
+jargon such as tickers. `result.section_map()` lists every present section
+with its status, size and description, so the model can see what exists
+without loading it, and ask for a section word matching missed.
+`result.sections` holds the same data per section (`SectionInfo`).
+
+### Memory gaps (0.4.0)
+
+When the question asks for something memory doesn't hold, `result.gaps`
+says so, and `result.gap_note()` renders it for the agent's context:
+
+```
+Not in memory: audit (internal audit findings). No stored memory mentions "10-K".
+```
+
+Three kinds: `absent_section` (the question matches a declared section
+that isn't stored), `unmatched_anchor` (an exact figure or identifier from
+the question appears nowhere in memory) and `no_match` (nothing matched).
+The note states facts only; what the agent should do next is up to your
+prompt. Gaps are logged at `INFO` and counted in `deepcq.gap_counts()`.
+
+### Duplicate sections (0.4.0)
+
+If one tier holds the same section twice (for example under two
+`state` keys), only the first copy is used. deepcq reports it in
+`result.duplicate_sections`, warns once per section and tier, and counts it
+as `duplicate_section`.
+
+### Usage statistics and health report (0.4.0)
+
+Each `DeepCQ` instance counts, per declared section, how often it was
+present, included, excluded, cut by the budget, or asked for while absent.
+`cq.usage()` returns the counters; `cq.health_report()` turns them into
+findings for an upkeep pass: sections never or always included, oversized,
+stale (given `recency` and `max_age`), duplicated, never present, or
+requested but missing. Checks that couldn't run are listed in `skipped`.
+`report.summary()` prints one finding per line.
+
+**Privacy.** Usage tracking is on by default, so it is safe by design: the
+counters hold only counts keyed by declared section names and fixed kind
+names — never query text, figures, memory content or anything identifying
+a caller — with no per-query records, and they never leave the instance.
+For an instance shared by several users, use `health_report(min_count=5)`
+to withhold small counts, or `DeepCQ(..., track_usage=False)`. deepcq's log
+records likewise carry no query text or figures by default;
+`DeepCQ(..., log_query_text=True)` adds them for debugging, along with the
+names of undeclared headers found in memory (which are always listed in
+`result.unknown_sections`).
+
+### Measuring what word matching misses
+
+`calibrate()` also reports `lexical_misses`: expected sections that shared
+no word, phrase or figure with the question. No threshold can reach those,
+so the fix is a description or keywords, not tuning.
 
 ### Fallback safety
 
 If no section clears the confidence threshold and
 `schema.fallback_include_all` is `True` (the default), `query()` returns the
 full unfiltered text instead of nothing — this prevents a vague query from
-silently discarding memory the agent might actually need.
+silently discarding memory the agent might actually need. The context
+budget still applies: if all of memory is larger than `max_chars`, the
+fallback returns the highest-scoring sections that fit and says so in
+`fallback_reason`.
 
 The fallback is never silent: the result has `fallback_used=True` and a
 `fallback_reason`, a warning is logged on the `"deepcq"` logger, and
 `deepcq.fallback_counts()` returns per-kind totals (`no_section_scored`,
-`no_section_present`, plus `absent_only` — see above) since process start or the last
+`no_section_present`, plus `absent_only`, `budget_cut` and
+`duplicate_section` — see above) since process start or the last
 `deepcq.reset_fallback_counts()`. Check them before trusting a reduction
 number.
 
@@ -260,11 +381,13 @@ deepcq/
 │   ├── intent.py                # score_sections() / score_sections_detailed()
 │   ├── anchors.py               # literal-anchor extraction
 │   ├── decay.py                 # Recency + decay functions
+│   ├── usage.py                 # usage counters + health report
 │   ├── vocabulary.py            # SynonymMap, load_pack()
 │   ├── vocab_packs/             # built-in synonym packs (finance.json)
 │   ├── phrases.py               # extract_phrases() for phrase-aware matching
 │   ├── calibration.py           # calibrate() threshold sweep
 │   ├── locate.py                # locate() chunk retrieval
+│   ├── sections.py              # split_sections(), Section, SectionSplit
 │   ├── tokens.py                # tokenize() / stem()
 │   ├── regex_gen.py              # query-token regex builder for free-text tiers
 │   ├── result.py                # QueryResult / OptimizationMetrics dataclasses
@@ -307,6 +430,12 @@ from deepcq.integrations.ternary import ToolContextProvider, PromptLibrary
 cq = DeepCQ(schema=MemorySchema(sections=["research", "risk-management"]))
 provider = ToolContextProvider(cq)
 context = provider.get_context("what is my portfolio concentration risk?")
+
+# Agents: name the omitted sections in the context and give the model a tool
+# to load one, instead of letting it assume the data doesn't exist.
+context = provider.get_context_with_note("what is my portfolio concentration risk?")
+tool = provider.section_tool_spec()       # {"name", "description", "parameters"}
+handler = provider.get_section            # call with the tool's `name` argument
 ```
 
 See `examples/openai_agents_sdk.py`, `examples/claude_agents_sdk.py`,

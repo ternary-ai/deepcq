@@ -8,3 +8,6 @@ build/
 dist/
 .venv/
 venv/
+
+# Working specs, kept local
+docs/spec-memory-selection.md

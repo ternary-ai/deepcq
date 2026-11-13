@@ -58,6 +58,12 @@ def score_sections_detailed(
     A section found in no tier scores 0.0 with `present=False`; the score
     its name/keywords alone would have given is kept as `absent_score`.
 
+    With `schema.descriptions` (and `score_descriptions`, the default), a
+    section's description joins its "schema" source like a keyword.
+
+    `duplicate_tiers` lists the sectioned tiers holding more than one
+    line-start copy of the section; only the first copy is scored/returned.
+
     `tiers` optionally maps tier names to the tier objects that produced
     `tier_texts`; their per-version cache then skips re-extracting and
     re-tokenizing sections whose tier has not changed since the last call.
@@ -74,6 +80,9 @@ def score_sections_detailed(
     for section in schema.sections:
         # (source name, weight, vocab, texts the source's phrases come from)
         schema_pieces = [section, *schema.keywords.get(section, [])]
+        description = schema.descriptions.get(section)
+        if description and schema.score_descriptions:
+            schema_pieces.append(description)
         schema_vocab: set[str] = set()
         for piece in schema_pieces:
             schema_vocab.update(tokenize(piece, include_stems=True))
@@ -82,26 +91,35 @@ def score_sections_detailed(
         sources: list[tuple[str, float, set[str], list[str]]] = [
             (SCHEMA_SOURCE, schema.schema_weight, schema_vocab, schema_pieces)
         ]
+        duplicate_tiers: list[str] = []
 
         for tier_name, text in tier_texts.items():
             if not text:
                 continue
 
-            pat = (schema.mention_pattern(section) if tier_name in FREE_TEXT_TIERS
+            free_text = tier_name in FREE_TEXT_TIERS
+            pat = (schema.mention_pattern(section) if free_text
                    else schema.extraction_pattern(section))
 
-            def compute(text: str = text, pat=pat) -> VocabEntry:
+            def compute(text: str = text, pat=pat, free_text: bool = free_text) -> VocabEntry:
                 m = pat.search(text)
                 if not m:
-                    return "", []
-                return m.group(0), tokenize(m.group(0), include_stems=True)
+                    return "", [], 0
+                # Repeated mentions are normal in free text; in a sectioned
+                # tier a second line-start copy is a duplicate (only the
+                # first is used), checked here so cached tiers cost nothing.
+                # 2 means "more than one": one search on from the first copy.
+                copies = 1 if free_text or not pat.search(text, m.end()) else 2
+                return m.group(0), tokenize(m.group(0), include_stems=True), copies
 
             tier = tiers.get(tier_name) if tiers else None
-            matched_text, tier_tokens = (
+            matched_text, tier_tokens, copies = (
                 tier._vocab_entry(schema_id, section, compute) if tier is not None else compute()
             )
             if not matched_text:
                 continue
+            if copies > 1:
+                duplicate_tiers.append(tier_name)
             tier_vocab = set(tier_tokens)
             if vocabulary is not None:
                 tier_vocab |= vocabulary.expand_text(matched_text)
@@ -175,6 +193,7 @@ def score_sections_detailed(
             tier_contributions=tier_contributions,
             present=present,
             absent_score=absent_score,
+            duplicate_tiers=duplicate_tiers,
         )
 
     return explanations

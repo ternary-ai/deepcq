@@ -1,5 +1,89 @@
 # Changelog
 
+## 0.4.0 — 2026-11-13
+
+deepcq decides which parts of an agent's working memory go into the
+context. This release makes that selection bounded, explained and honest
+about what is missing, derived from Anthropic's
+[The components of agent memory](https://www.anthropic.com/research/components-of-agent-memory).
+Everything is on by default and deterministic: no model call, and the same
+memory and question always give the same result.
+
+### Added
+
+- **Context budget.** `MemorySchema.max_chars` (default 25,000 characters)
+  caps what `query()` returns, separators included. Sections that pass the
+  threshold are kept highest score first; one that doesn't fit is skipped
+  whole, never truncated. Cut sections are listed in
+  `QueryResult.sections_over_budget` (cache/history in `tiers_over_budget`),
+  logged and counted as `budget_cut`. `query(..., max_chars=n)` overrides
+  it; `None` turns it off. `locate()` takes the same `max_chars`.
+- **Section descriptions.** `MemorySchema(descriptions={...})`, one line per
+  section. Shown in the section map and gap note, and added to the
+  section's scoring vocabulary (`score_descriptions=False` turns that off).
+- **Section map.** `QueryResult.sections` (`SectionInfo`: status, score,
+  size, description) and `QueryResult.section_map(only_omitted=False)`, a
+  compact index of present sections so a model can ask for one it needs.
+- **Memory gap signal.** `QueryResult.gaps` (`MemoryGap`) and `gap_note()`:
+  sections the question asked for that memory doesn't hold, figures or
+  identifiers found nowhere in memory, and no match at all. Logged at
+  `INFO`, counted in `deepcq.gap_counts()` / `reset_gap_counts()`.
+- **Duplicate-section warning.** A section stored twice in one tier is
+  reported in `QueryResult.duplicate_sections`, warned once per section and
+  tier, and counted as `duplicate_section`. The first copy is still used.
+- **Usage statistics and health report.** Per-instance counters
+  (`DeepCQ.usage()`, `reset_usage()`) and `DeepCQ.health_report()`:
+  sections never or always included, oversized, stale, duplicated, never
+  present, or requested but missing, with skipped checks listed. Counters
+  hold only counts keyed by declared names — never query text or memory
+  content — and never leave the instance. `health_report(min_count=k)`
+  withholds small counts for shared instances.
+- **Pinned sections.** `MemorySchema(pinned=[...])` keeps sections whenever
+  present, even below threshold (`QueryResult.sections_pinned`). They go
+  first within the context budget but still obey it, and don't suppress
+  the fallback. Pinning an undeclared section raises `ValueError`.
+- **Unknown-section report.** `QueryResult.unknown_sections` lists headers
+  in the state tier that the schema doesn't declare, so a renamed header
+  can't silently drop data. Warned once per schema and name; the warning
+  gives a count, and names only with `log_query_text=True`.
+- **Section parser and lookup.** `split_sections(text, schema)` returns a
+  preamble plus `Section(name, text, known)` blocks; `DeepCQ.get_section()`
+  fetches one by name, then prefix, case-insensitively.
+- **Omitted-section note and reload tool.** `QueryResult.omitted_note()`
+  (the section map's omitted list plus an optional hint), and
+  `ToolContextProvider.get_context_with_note()`, `section_tool_spec()` and
+  `get_section()` in the ternary integration.
+- **Pre-chunked `locate()`.** Pass a list of strings: indices are list
+  positions, texts come back exactly as given, and blank entries are
+  skipped without shifting indices.
+- **Lexical misses.** `calibrate()` reports expected sections that shared
+  no word, phrase or figure with the question (`lexical_misses`), which no
+  threshold can reach.
+- **Digit-led identifiers as anchors.** "10-K", "8-K", "10-Q" are now
+  extracted whole from questions and matched exactly.
+
+### Changed
+
+- `query()` returns at most 25,000 characters by default; the
+  include-everything fallback is capped by the same budget. Set
+  `max_chars=None` for 0.3.1 behaviour.
+- `locate()` returns candidates totalling at most 25,000 characters by
+  default.
+- Log records no longer contain query text: the fallback and `absent_only`
+  warnings drop their 80-character excerpt. `DeepCQ(..., log_query_text=True)`
+  restores it.
+- Each `DeepCQ` instance tracks usage counts (`track_usage=False` to turn
+  off).
+- Scores change only where the new features add vocabulary: for schemas
+  that declare descriptions, and for questions naming a digit-led
+  identifier such as "10-K" (previously only "10" was extracted, which
+  never matched). Other thresholds need no recalibration.
+
+### Fixed
+
+- `from deepcq import locate` returned the `deepcq.locate` module instead
+  of the function once anything had imported the submodule.
+
 ## 0.3.1 — 2026-11-01
 
 Bug fixes. Several change scores or returned content by default, so
