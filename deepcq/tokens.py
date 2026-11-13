@@ -38,6 +38,9 @@ _SUFFIX_RULES: list[tuple[str, str]] = [
 ]
 
 _MIN_ROOT = 3
+# A word: a letter, then letters/digits — any script, so "Kündigungen" stays
+# one word instead of the fragment "ndigungen". Underscores split words.
+_WORD = re.compile(r"[^\W\d_][^\W_]*")
 _VOWELS = frozenset("aeiou")
 
 
@@ -68,7 +71,7 @@ def tokenize(text: str, include_stems: bool = True) -> list[str]:
     With include_stems=True each unique token is followed by its stemmed
     form (if different), giving the caller both surface and root forms.
     """
-    words = re.findall(r"[a-zA-Z][a-zA-Z0-9]*", text.lower())
+    words = _WORD.findall(text.lower())
     seen: set[str] = set()
     result: list[str] = []
     for w in words:
@@ -90,6 +93,6 @@ def content_words(text: str) -> list[str]:
     no dedup. The adjacency-preserving counterpart to tokenize(); phrase
     and multi-word-synonym matching depend on that adjacency."""
     return [
-        w for w in re.findall(r"[a-zA-Z][a-zA-Z0-9]*", text.lower())
+        w for w in _WORD.findall(text.lower())
         if w not in _STOPWORDS and len(w) >= 2
     ]

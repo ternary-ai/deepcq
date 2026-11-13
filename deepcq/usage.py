@@ -16,7 +16,8 @@ class SectionUsage:
     queries: int = 0           # queries run while the section was present
     included: int = 0
     excluded: int = 0          # present, below threshold
-    over_budget: int = 0       # passed the threshold, cut by max_chars
+    over_budget: int = 0       # passed the threshold (or pinned), cut by max_chars
+    pinned: int = 0            # below threshold, included because it is pinned
     absent: int = 0            # queries run while the section was absent
     requested_absent: int = 0  # absent, but the query matched its name/keywords/description
     literal_hits: int = 0      # included, with an exact-figure/identifier anchor hit

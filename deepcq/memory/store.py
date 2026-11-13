@@ -1,8 +1,65 @@
 """T4 — LongTermStore and T5 — ReferenceData."""
 from __future__ import annotations
 import json
+import os
+import secrets
 from pathlib import Path
 from ._vocab_cache import VocabCache
+
+
+def _read_json_dict(path: Path) -> dict:
+    """Load a store file. A file that can't be read or isn't a JSON object
+    raises: loading it as empty memory would hide the data, and the next
+    write would overwrite the file with nothing in it."""
+    text = path.read_text(encoding="utf-8")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"deepcq: {path} is not valid JSON ({e}); refusing to load it as empty "
+            "memory, which the next write would save over the file"
+        ) from e
+    if not isinstance(data, dict):
+        raise ValueError(f"deepcq: {path} holds a JSON {type(data).__name__}, expected an object")
+    return data
+
+
+def _write_json_atomic(path: Path, data: dict) -> None:
+    """Write `data` to a temporary file next to the store, flush it to disk,
+    then swap it into place with os.replace(). The swap is atomic, so a
+    crash, kill or full disk mid-write leaves the previous file intact —
+    a reader sees the old file or the new one, never a half-written one.
+
+    - A symlinked store is written through to its target, as a plain write
+      would; the link itself is kept.
+    - The temporary file is created with O_EXCL under a random name, so it
+      never follows or reuses an existing path. Its mode is 0o666 minus the
+      umask (applied by the kernel — the process umask is never changed),
+      then set to the store's existing mode when there is one.
+    """
+    target = Path(os.path.realpath(path))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.parent / f".{target.name}.{secrets.token_hex(8)}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(tmp, flags, 0o666)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            try:
+                mode = target.stat().st_mode & 0o777
+            except FileNotFoundError:
+                mode = None
+            if mode is not None and hasattr(os, "fchmod"):
+                os.fchmod(f.fileno(), mode)
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 class LongTermStore(VocabCache):
@@ -37,15 +94,18 @@ class LongTermStore(VocabCache):
         return "\n".join(parts)
 
     def _load(self) -> None:
-        try:
-            self._data = json.loads(self._path.read_text())
-        except (json.JSONDecodeError, OSError):
-            self._data = {}
+        data = _read_json_dict(self._path)
+        bad = [k for k, v in data.items() if not (isinstance(v, list) and all(isinstance(e, str) for e in v))]
+        if bad:
+            raise ValueError(
+                f"deepcq: {self._path} is not a notes store: entries under key(s) {bad[:5]} "
+                "are not lists of strings"
+            )
+        self._data = data
 
     def _save(self) -> None:
         if self._path:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(json.dumps(self._data, indent=2))
+            _write_json_atomic(self._path, self._data)
 
 
 class ReferenceData(VocabCache):
@@ -64,10 +124,7 @@ class ReferenceData(VocabCache):
     def _ensure_loaded(self) -> None:
         if self._data is None:
             if self._path and self._path.exists():
-                try:
-                    self._data = json.loads(self._path.read_text())
-                except (json.JSONDecodeError, OSError):
-                    self._data = {}
+                self._data = _read_json_dict(self._path)
             else:
                 self._data = {}
 
@@ -80,8 +137,7 @@ class ReferenceData(VocabCache):
         self._data[key] = value
         self._bump()
         if self._path:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(json.dumps(self._data, indent=2))
+            _write_json_atomic(self._path, self._data)
 
     def as_text(self) -> str:
         self._ensure_loaded()

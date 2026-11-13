@@ -101,6 +101,12 @@ Pass `max_candidates` to cap the result to the highest-scoring chunks.
 Each tier renders itself to text via `as_text()`. `DeepCQ.query()` pulls text
 from all five tiers before scoring.
 
+File-backed stores (`store_path`, `reference_path`) save atomically: a crash
+mid-save leaves the previous file intact. A corrupt store file raises
+`ValueError` on load instead of being treated as empty. **Only one process
+should write to a store file at a time:** each process keeps its own copy in
+memory, so two writers overwrite each other's entries.
+
 ### 2. Tokenizing the query (`tokens.py`)
 
 The query is lowercased, split into words, stripped of stopwords, and each
@@ -269,15 +275,16 @@ threshold — exactly what the agent can ask to reload.
 
 ### Context budget (0.4.0)
 
-`query()` returns at most `MemorySchema.max_chars` characters of content —
-25,000 by default (about 6,000 English tokens), counting the separators.
+Set `MemorySchema(max_chars=n)` and `query()` returns at most `n`
+characters of content, counting the separators. There is no default budget:
+the right size depends on your model and prompt, so deepcq doesn't guess.
 Sections that pass the threshold are kept highest score first; a section
 that doesn't fit is skipped whole, never truncated, and smaller relevant
 sections below it still get in. Then cache and history, if they fit.
 Content keeps its usual order. Cut sections are listed in
 `sections_over_budget` (free-text tiers in `tiers_over_budget`), logged, and
 counted as `budget_cut`. Override per call with `query(..., max_chars=n)`;
-`None` turns the budget off. `locate()` takes the same `max_chars`.
+`None` turns the budget off for that call. `locate()` takes the same `max_chars`.
 
 ### Section descriptions and the section map (0.4.0)
 
@@ -356,7 +363,7 @@ If no section clears the confidence threshold and
 `schema.fallback_include_all` is `True` (the default), `query()` returns the
 full unfiltered text instead of nothing — this prevents a vague query from
 silently discarding memory the agent might actually need. The context
-budget still applies: if all of memory is larger than `max_chars`, the
+budget, when set, still applies: if all of memory is larger than `max_chars`, the
 fallback returns the highest-scoring sections that fit and says so in
 `fallback_reason`.
 
