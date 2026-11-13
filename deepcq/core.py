@@ -251,7 +251,7 @@ class DeepCQ:
         reference time for that decay (defaults to the current time).
 
         `max_chars` caps the returned content (default: the schema's
-        max_chars, 25,000; None = no budget). Sections that pass the
+        max_chars, None by default = no budget). Sections that pass the
         threshold are kept highest score first; one that doesn't fit is
         skipped whole and listed in `sections_over_budget`.
         """

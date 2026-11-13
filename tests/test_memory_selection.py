@@ -107,13 +107,16 @@ def test_section_map_on_fallback_has_nothing_omitted():
 
 # --- §3 context budget ------------------------------------------------------------------
 
-def test_default_budget_is_25000_and_overridable():
+def test_no_default_budget_and_overridable():
     cq = _sized({"a": 30_000})
-    assert cq.schema.max_chars == 25_000
-    assert cq.query("revenue").sections_over_budget == ["a"]
-    assert cq.query("revenue", max_chars=None).sections_included == ["a"]
+    assert cq.schema.max_chars is None
+    assert cq.query("revenue").sections_included == ["a"]
+    assert cq.query("revenue").sections_over_budget == []
+    assert cq.query("revenue", max_chars=25_000).sections_over_budget == ["a"]
     assert cq.query("revenue", max_chars=40_000).sections_included == ["a"]
-    assert _sized({"a": 30_000}, max_chars=None).query("revenue").sections_included == ["a"]
+    budgeted = _sized({"a": 30_000}, max_chars=25_000)
+    assert budgeted.query("revenue").sections_over_budget == ["a"]
+    assert budgeted.query("revenue", max_chars=None).sections_included == ["a"]
 
 
 @pytest.mark.parametrize("bad", [0, -5, 1.5, True])
@@ -202,7 +205,9 @@ def test_locate_budget_alone_and_with_max_candidates():
     assert [c.index for c in locate(text, "revenue", max_chars=None)] == [0, 1, 2]
     assert [c.index for c in locate(text, "revenue", max_chars=30)] == [1, 2]
     assert [c.index for c in locate(text, "revenue", max_chars=30, max_candidates=2)] == [1]
-    assert locate(text, "revenue") == locate(text, "revenue", max_chars=None)   # default fits
+    assert locate(text, "revenue") == locate(text, "revenue", max_chars=None)   # no default budget
+    big = "revenue " * 5_000
+    assert [c.index for c in locate(big, "revenue")] == [0]                      # 40,000 chars, not cut
 
 
 # --- §4 duplicate-section warning ----------------------------------------------------

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.1 — 2026-11-13
+
+### Changed
+
+- **No default context budget.** `MemorySchema.max_chars` and `locate()`'s
+  `max_chars` now default to `None`, restoring the 0.3.1 behaviour: nothing
+  is cut unless you set a budget. The 25,000-character default in 0.4.0 had
+  no relation to the caller's model, changed upgraders' output without
+  being asked for, and could drop the highest-scoring section whenever it
+  alone was larger than the budget. Set `max_chars=n` to turn the budget
+  on; cuts are still listed, logged and counted as `budget_cut`.
+- `health_report()` skips the oversized check (and lists it in `skipped`)
+  unless `max_chars` or `max_section_chars` is set.
+
 ## 0.4.0 — 2026-11-13
 
 deepcq decides which parts of an agent's working memory go into the

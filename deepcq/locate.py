@@ -47,7 +47,7 @@ def locate(
     decay.py. `anchor_patterns` overrides the literal-anchor patterns used
     for this call (see anchors.py); None uses the library defaults.
 
-    `max_chars` (default 25,000; None = off) caps the total length of the
+    `max_chars` (default None = no budget) caps the total length of the
     returned chunk texts: candidates are kept highest score first (ties by
     index), a chunk that doesn't fit is skipped, never truncated, and the
     cut is logged and counted as "budget_cut". `max_candidates` applies

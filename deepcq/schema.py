@@ -13,9 +13,10 @@ TIER_NAMES: tuple[str, ...] = ("state", "cache", "history", "notes", "reference"
 
 # Longest allowed section description (one line, see MemorySchema).
 MAX_DESCRIPTION_CHARS = 200
-# Default context budget for query()/locate(), in characters: the same order
-# as the 25 KB of MEMORY.md that Claude Code loads, about 6,000 English tokens.
-DEFAULT_MAX_CHARS = 25_000
+# Default context budget for query()/locate(): none. The right budget depends
+# on the caller's model and prompt, so deepcq doesn't guess one; set max_chars
+# to turn the budget on.
+DEFAULT_MAX_CHARS: int | None = None
 
 
 # Name of a header line that isn't a declared section: starts with a letter,
@@ -100,8 +101,8 @@ class MemorySchema:
         Context budget for query(), in characters of returned content
         (separators included). Highest-scoring sections are kept first; a
         section that doesn't fit is skipped whole, never truncated, and
-        reported in QueryResult.sections_over_budget. Default 25,000; None
-        turns the budget off. query(max_chars=...) overrides it per call.
+        reported in QueryResult.sections_over_budget. Default None (no
+        budget); set it to the size your model and prompt allow. query(max_chars=...) overrides it per call.
     """
 
     sections: Sequence[str]
