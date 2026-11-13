@@ -164,3 +164,49 @@ def test_langchain_adapter_without_input_logs_and_counts(caplog):
     assert "no input" in caplog.text
     assert fallback_counts()["no_query"] == 1
     assert cq.usage().fallbacks["no_query"] == 1
+
+
+# --- store writes are atomic ----------------------------------------------------
+
+@pytest.mark.parametrize("make_store, write", [
+    (LongTermStore, lambda store: store.append("a", "second")),
+    (ReferenceData, lambda store: store.set("a", "second")),
+])
+def test_failed_write_leaves_previous_file_intact(tmp_path, monkeypatch, make_store, write):
+    path = tmp_path / "store.json"
+    path.write_text(json.dumps({"a": ["first"]} if make_store is LongTermStore else {"a": "first"}))
+    before = path.read_text()
+    store = make_store(path)
+
+    def crash(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("deepcq.memory.store.os.replace", crash)
+    with pytest.raises(OSError, match="disk full"):
+        write(store)
+    assert path.read_text() == before
+    assert [p.name for p in tmp_path.iterdir()] == ["store.json"]   # temp file removed
+
+
+def test_atomic_write_round_trips(tmp_path):
+    path = tmp_path / "sub" / "notes.json"
+    store = LongTermStore(path)
+    store.append("a", "x")
+    store.append("a", "y")
+    assert LongTermStore(path).get("a") == ["x", "y"]
+    assert [p.name for p in path.parent.iterdir()] == ["notes.json"]
+
+
+def test_atomic_write_keeps_file_mode(tmp_path):
+    import os
+    import stat
+    path = tmp_path / "notes.json"
+    path.write_text("{}")
+    os.chmod(path, 0o640)
+    LongTermStore(path).append("a", "x")
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+    new = tmp_path / "new.json"
+    LongTermStore(new).append("a", "x")
+    umask = os.umask(0)
+    os.umask(umask)
+    assert stat.S_IMODE(new.stat().st_mode) == 0o666 & ~umask

@@ -1,6 +1,8 @@
 """T4 — LongTermStore and T5 — ReferenceData."""
 from __future__ import annotations
 import json
+import os
+import tempfile
 from pathlib import Path
 from ._vocab_cache import VocabCache
 
@@ -20,6 +22,39 @@ def _read_json_dict(path: Path) -> dict:
     if not isinstance(data, dict):
         raise ValueError(f"deepcq: {path} holds a JSON {type(data).__name__}, expected an object")
     return data
+
+
+def _file_mode(path: Path) -> int:
+    try:
+        return path.stat().st_mode & 0o777
+    except FileNotFoundError:
+        umask = os.umask(0)
+        os.umask(umask)
+        return 0o666 & ~umask
+
+
+def _write_json_atomic(path: Path, data: dict) -> None:
+    """Write `data` to a temporary file next to `path`, flush it to disk,
+    then swap it into place with os.replace(). The swap is atomic, so a
+    crash, kill or full disk mid-write leaves the previous file intact —
+    a reader sees the old file or the new one, never a half-written one."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        # mkstemp creates the file 0600; keep the store's existing mode, or
+        # the umask default a plain write would give a new file.
+        os.chmod(tmp, _file_mode(path))
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 class LongTermStore(VocabCache):
@@ -58,8 +93,7 @@ class LongTermStore(VocabCache):
 
     def _save(self) -> None:
         if self._path:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(json.dumps(self._data, indent=2))
+            _write_json_atomic(self._path, self._data)
 
 
 class ReferenceData(VocabCache):
@@ -91,8 +125,7 @@ class ReferenceData(VocabCache):
         self._data[key] = value
         self._bump()
         if self._path:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(json.dumps(self._data, indent=2))
+            _write_json_atomic(self._path, self._data)
 
     def as_text(self) -> str:
         self._ensure_loaded()

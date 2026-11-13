@@ -36,6 +36,10 @@ other scores are unchanged.
    `ValueError`.** Before, a file that wasn't valid JSON (or wasn't a JSON
    object) loaded as empty memory without a warning, and the next write
    overwrote it, losing every stored entry. The file is now left as it is.
+   Saves are also atomic now: the JSON goes to a temporary file next to the
+   store, is flushed to disk, and replaces the store with `os.replace()`. A
+   crash, kill or full disk mid-save leaves the previous file intact instead
+   of a half-written one. The file keeps its permissions.
 5. **Pinned sections aren't reported as never included.** A pinned section
    below threshold was counted as excluded, so `health_report()` listed it
    in `never_included` although it reached every prompt. It now has its own
